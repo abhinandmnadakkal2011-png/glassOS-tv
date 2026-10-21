@@ -1,0 +1,3 @@
+#!/bin/sh
+# local helper: run a shell command on the TV
+cd "$(dirname "$0")/.." && : "${TV_HOST:?set TV_HOST to your TV IP, e.g. TV_HOST=192.168.1.50}"; export TV_HOST; exec tools/venv/bin/python -I tools/tv.py "$@"

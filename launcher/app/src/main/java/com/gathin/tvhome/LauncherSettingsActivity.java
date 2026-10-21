@@ -1,210 +1,430 @@
 package com.gathin.tvhome;
 
 import android.app.Activity;
-import android.app.AlertDialog;
-import android.content.ActivityNotFoundException;
 import android.content.Intent;
-import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
+import android.content.pm.ResolveInfo;
+import android.graphics.Outline;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.StateListDrawable;
 import android.os.Bundle;
-import android.provider.Settings;
+import android.view.Gravity;
+import android.view.KeyEvent;
+import android.view.View;
+import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
+import android.widget.FrameLayout;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
-import android.widget.Toast;
 
-import java.io.File;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
-/** Remote-friendly settings owned by the launcher; system settings stay one row away. */
-public final class LauncherSettingsActivity extends Activity {
-    private SharedPreferences choices;
-    private final TextView[] columnChoices = new TextView[4];
-    private final TextView[] rowChoices = new TextView[4];
-    private TextView wallpaperChoice;
-    private TextView animationsChoice;
-    private TextView advancedChoice;
-    private TextView followThemeChoice;
-    private int columns;
-    private int rowsBelowDock;
-    private boolean animations;
-    private boolean advancedEffects;
+/**
+ * Home settings, made for the remote: Left/Right change a value, OK toggles. In the app list, OK picks an
+ * app up, Up/Down move it and OK drops it; Right reaches its Shown/Hidden switch. Every change is saved
+ * at once and Home rebuilds itself when you go back.
+ */
+public class LauncherSettingsActivity extends Activity {
+
+    private static final class App {
+        final String pkg;
+        final String label;
+        final Drawable icon;
+
+        App(String pkg, String label, Drawable icon) {
+            this.pkg = pkg;
+            this.label = label;
+            this.icon = icon;
+        }
+    }
+
+    private static final int PANEL_DP = 360;
+
+    private LauncherPrefs prefs;
+    private float density;
+    private Typeface font;
+    private LinearLayout appRows;
+    private final List<App> apps = new ArrayList<>();
+    private Set<String> hidden;
+    /** The row being moved, or null. */
+    private View moving;
 
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
-        setContentView(R.layout.activity_launcher_settings);
-        choices = getSharedPreferences(Config.SETTINGS_NAME, MODE_PRIVATE);
-        Config config = Config.load(this);
-        columns = config.columns;
-        rowsBelowDock = config.rowsBelowDock;
-        animations = config.animations;
-        advancedEffects = config.animations && config.advancedEffects;
+        prefs = LauncherPrefs.get(this);
+        density = getResources().getDisplayMetrics().density;
+        font = getResources().getFont(R.font.outfit);
+        hidden = prefs.hidden();
+        build();
+    }
 
-        int[] ids = {R.id.columns4, R.id.columns5, R.id.columns6, R.id.columns7};
-        for (int i = 0; i < ids.length; i++) {
-            final int value = i + 4;
-            columnChoices[i] = findViewById(ids[i]);
-            columnChoices[i].setOnClickListener(v -> {
-                if (columns == value) return;
-                columns = value;
-                choices.edit().putInt("columns", value).apply();
-                setResult(RESULT_OK);
-                refresh();
-            });
-        }
-        int[] rowIds = {R.id.rows0, R.id.rows1, R.id.rows2, R.id.rows3};
-        for (int i = 0; i < rowIds.length; i++) {
-            final int value = i;
-            rowChoices[i] = findViewById(rowIds[i]);
-            rowChoices[i].setOnClickListener(v -> {
-                if (rowsBelowDock == value) return;
-                rowsBelowDock = value;
-                choices.edit().putInt(Config.ROWS_BELOW_DOCK_KEY, value).apply();
-                setResult(RESULT_OK);
-                refresh();
-            });
-        }
-        // Keep the numeric choices increasing in the Hebrew reading direction. Reorder the
-        // actual views so D-pad focus follows their positions without changing the saved values.
-        if (getResources().getBoolean(R.bool.rtl_app_grid)) {
-            reverseRow(columnChoices);
-            reverseRow(rowChoices);
-        }
-        wallpaperChoice = findViewById(R.id.wallpaperChoice);
-        wallpaperChoice.setOnClickListener(v -> showWallpaperPicker());
-        animationsChoice = findViewById(R.id.animationsChoice);
-        animationsChoice.setOnClickListener(v -> {
-            animations = !animations;
-            if (!animations) advancedEffects = false;
-            choices.edit().putBoolean("animations", animations)
-                    .putBoolean("advanced_effects", advancedEffects).apply();
-            setResult(RESULT_OK);
-            refresh();
+    private void build() {
+        // A frosted panel floating on the right; Home stays visible on the left and rebuilds live.
+        FrameLayout root = new FrameLayout(this);
+        FrameLayout panel = new FrameLayout(this);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xEB141416);
+        bg.setCornerRadius(dp(28));
+        bg.setStroke(Math.max(1, dp(1)), 0x33FFFFFF);
+        panel.setBackground(bg);
+        panel.setClipToOutline(true);
+        FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(dp(PANEL_DP), ViewGroup.LayoutParams.MATCH_PARENT,
+                Gravity.END);
+        plp.setMargins(dp(20), dp(20), dp(20), dp(20));
+        root.addView(panel, plp);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setVerticalScrollBarEnabled(false);
+        scroll.setClipToPadding(false);
+        scroll.setPadding(dp(18), dp(24), dp(18), dp(40));
+        panel.addView(scroll, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
+        LinearLayout col = new LinearLayout(this);
+        col.setOrientation(LinearLayout.VERTICAL);
+        scroll.addView(col, new ScrollView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        col.addView(text(getString(R.string.ls_title), 24, 0xFFFFFFFF, 500));
+        TextView hint = text(getString(R.string.ls_hint), 12, 0x99FFFFFF, 400);
+        hint.setPadding(0, dp(6), 0, dp(10));
+        col.addView(hint);
+
+        col.addView(section(R.string.ls_dock));
+        col.addView(stepper(R.string.ls_icon_size, LauncherPrefs.ICON, LauncherPrefs.DEF_ICON_DP, 32, 104, 4, "dp"));
+        col.addView(stepper(R.string.ls_spacing, LauncherPrefs.GAP, LauncherPrefs.DEF_GAP_DP, 6, 40, 2, "dp"));
+        col.addView(stepper(R.string.ls_visible, LauncherPrefs.VISIBLE, LauncherPrefs.DEF_VISIBLE, 4, 10, 1, ""));
+        col.addView(chooser(R.string.ls_icon_theme, LauncherPrefs.ICON_THEME, LauncherPrefs.DEF_ICON_THEME, IconThemes.NAMES));
+        col.addView(chooser(R.string.ls_icon_tint, LauncherPrefs.ICON_TINT, LauncherPrefs.DEF_ICON_TINT, IconThemes.TINT_NAMES));
+        col.addView(toggle(R.string.ls_icon_glass, LauncherPrefs.ICON_GLASS));
+        col.addView(stepper(R.string.ls_glass_edge, LauncherPrefs.GLASS_EDGE, LauncherPrefs.DEF_GLASS_EDGE, 1, 10, 1, ""));
+        col.addView(stepper(R.string.ls_glass_bright, LauncherPrefs.GLASS_BRIGHT, LauncherPrefs.DEF_GLASS_BRIGHT, 0, 200, 10, "%"));
+        col.addView(stepper(R.string.ls_shade, LauncherPrefs.SHADE, LauncherPrefs.DEF_SHADE, 0, 100, 10, "%"));
+        col.addView(stepper(R.string.ls_shade_height, LauncherPrefs.SHADE_HEIGHT, LauncherPrefs.DEF_SHADE_HEIGHT, 80, 540, 20, "dp"));
+        col.addView(stepper(R.string.ls_bottom, LauncherPrefs.BOTTOM, LauncherPrefs.DEF_BOTTOM_DP, 0, 200, 4, "dp"));
+
+        col.addView(section(R.string.ls_wallpaper_section));
+        col.addView(wallpaperChooser());
+        col.addView(stepper(R.string.ls_wall_dim, LauncherPrefs.WALL_DIM, LauncherPrefs.DEF_WALL_DIM, 0, 80, 5, "%"));
+        col.addView(toggle(R.string.ls_glow, LauncherPrefs.GLOW));
+
+        col.addView(section(R.string.ls_clock));
+        col.addView(toggle(R.string.ls_show_clock, LauncherPrefs.SHOW_CLOCK));
+        col.addView(toggle(R.string.ls_show_date, LauncherPrefs.SHOW_DATE));
+        col.addView(stepper(R.string.ls_clock_size, LauncherPrefs.CLOCK, LauncherPrefs.DEF_CLOCK_SP, 48, 140, 4, ""));
+        col.addView(stepper(R.string.ls_clock_weight, LauncherPrefs.CLOCK_WEIGHT, LauncherPrefs.DEF_CLOCK_WEIGHT, 100, 900, 50, ""));
+        col.addView(stepper(R.string.ls_clock_shadow, LauncherPrefs.CLOCK_SHADOW, LauncherPrefs.DEF_CLOCK_SHADOW, 0, 100, 10, "%"));
+        col.addView(stepper(R.string.ls_date_size, LauncherPrefs.DATE, LauncherPrefs.DEF_DATE_SP, 12, 40, 1, ""));
+        col.addView(stepper(R.string.ls_clock_top, LauncherPrefs.CLOCK_TOP, LauncherPrefs.DEF_CLOCK_TOP_DP, 0, 320, 4, "dp"));
+
+        col.addView(section(R.string.ls_apps));
+        TextView appsHint = text(getString(R.string.ls_apps_hint), 12, 0x80FFFFFF, 400);
+        appsHint.setPadding(dp(4), 0, 0, dp(8));
+        col.addView(appsHint);
+        appRows = new LinearLayout(this);
+        appRows.setOrientation(LinearLayout.VERTICAL);
+        col.addView(appRows);
+        loadApps();
+        for (App a : apps) appRows.addView(appRow(a));
+
+        col.addView(section(R.string.ls_other));
+        View reset = row(text(getString(R.string.ls_reset), 15, 0xFFFF6961, 500), null);
+        reset.setOnClickListener(v -> {
+            prefs.reset();
+            hidden = prefs.hidden();
+            build();
         });
-        advancedChoice = findViewById(R.id.advancedChoice);
-        advancedChoice.setOnClickListener(v -> {
-            if (advancedEffects) {
-                setAdvanced(false);
-            } else {
-                new AlertDialog.Builder(this)
-                        .setTitle(R.string.advanced_effects)
-                        .setMessage(R.string.advanced_effects_warning)
-                        .setPositiveButton(R.string.enable, (dialog, which) -> setAdvanced(true))
-                        .setNegativeButton(android.R.string.cancel, null)
-                        .show();
+        col.addView(reset);
+
+        setContentView(root);
+        col.getChildAt(3).requestFocus();
+    }
+
+    // ---- rows ------------------------------------------------------------------------------------
+
+    /** Left/Right through named choices, stored as their index; wraps around. */
+    private View chooser(int labelRes, String key, int def, String[] names) {
+        TextView value = text("", 15, 0xFFFFFFFF, 500);
+        View row = row(text(getString(labelRes), 15, 0xE6FFFFFF, 400), value);
+        int[] at = {Math.max(0, Math.min(names.length - 1, prefs.getInt(key, def)))};
+        Runnable show = () -> value.setText("\u2039  " + names[at[0]] + "  \u203A");
+        show.run();
+        row.setOnKeyListener((r, keyCode, e) -> {
+            if (e.getAction() != KeyEvent.ACTION_DOWN) return false;
+            int d = keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : keyCode == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 0;
+            if (d == 0) return false;
+            at[0] = (at[0] + d + names.length) % names.length;
+            prefs.putInt(key, at[0]);
+            show.run();
+            return true;
+        });
+        return row;
+    }
+
+    private View stepper(int labelRes, String key, int def, int min, int max, int step, String unit) {
+        TextView value = text("", 15, 0xFFFFFFFF, 500);
+        View row = row(text(getString(labelRes), 15, 0xE6FFFFFF, 400), value);
+        int[] v = {prefs.getInt(key, def)};
+        Runnable show = () -> value.setText("‹  " + v[0] + (unit.isEmpty() ? "" : " " + unit) + "  ›");
+        show.run();
+        row.setOnKeyListener((r, keyCode, e) -> {
+            if (e.getAction() != KeyEvent.ACTION_DOWN) return false;
+            int d = keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ? step : keyCode == KeyEvent.KEYCODE_DPAD_LEFT ? -step : 0;
+            if (d == 0) return false;
+            int n = Math.max(min, Math.min(max, v[0] + d));
+            if (n != v[0]) {
+                v[0] = n;
+                prefs.putInt(key, n);
+                show.run();
+            }
+            return true;
+        });
+        return row;
+    }
+
+    /**
+     * Left/Right through None, the built-in wallpapers, the pictures in the wallpapers folder and, when a
+     * theme pushed one, its picture. Wraps around at either end.
+     */
+    private View wallpaperChooser() {
+        List<int[]> codes = new ArrayList<>();      // {choice}
+        List<String> files = new ArrayList<>();     // file name for FILE choices, else null
+        List<String> names = new ArrayList<>();
+        codes.add(new int[]{Wallpapers.NONE});
+        files.add(null);
+        names.add(getString(R.string.ls_wall_none));
+        codes.add(new int[]{Wallpapers.DAILY});
+        files.add(null);
+        names.add(getString(R.string.ls_wall_daily));
+        for (int i = 1; i <= Wallpapers.count(); i++) {
+            codes.add(new int[]{i});
+            files.add(null);
+            names.add(Wallpapers.name(i, "", ""));
+        }
+        for (java.io.File f : Wallpapers.files(this)) {
+            codes.add(new int[]{Wallpapers.FILE});
+            files.add(f.getName());
+            names.add(Wallpapers.label(f));
+        }
+        boolean custom = Config.load(this).wallpaper != null;
+        if (custom) {
+            codes.add(new int[]{Wallpapers.CUSTOM});
+            files.add(null);
+            names.add(getString(R.string.ls_wall_custom));
+        }
+        int current = prefs.getInt(LauncherPrefs.WALLPAPER, custom ? Wallpapers.CUSTOM : Wallpapers.NONE);
+        String currentFile = prefs.getString(LauncherPrefs.WALL_FILE);
+        int start = 0;
+        for (int i = 0; i < codes.size(); i++) {
+            if (codes.get(i)[0] == current && (current != Wallpapers.FILE || currentFile.equals(files.get(i)))) {
+                start = i;
+                break;
+            }
+        }
+        TextView value = text("", 15, 0xFFFFFFFF, 500);
+        value.setSingleLine(true);
+        View row = row(text(getString(R.string.ls_wallpaper), 15, 0xE6FFFFFF, 400), value);
+        int[] at = {start};
+        Runnable show = () -> value.setText("\u2039  " + names.get(at[0]) + "  \u203A");
+        show.run();
+        row.setOnKeyListener((r, keyCode, e) -> {
+            if (e.getAction() != KeyEvent.ACTION_DOWN) return false;
+            int d = keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ? 1 : keyCode == KeyEvent.KEYCODE_DPAD_LEFT ? -1 : 0;
+            if (d == 0) return false;
+            at[0] = (at[0] + d + codes.size()) % codes.size();
+            prefs.putWallpaper(codes.get(at[0])[0], files.get(at[0]));
+            show.run();
+            return true;
+        });
+        return row;
+    }
+
+    private View toggle(int labelRes, String key) {
+        TextView value = text("", 15, 0xFFFFFFFF, 500);
+        View row = row(text(getString(labelRes), 15, 0xE6FFFFFF, 400), value);
+        Runnable show = () -> value.setText(prefs.getBool(key) ? R.string.ls_on : R.string.ls_off);
+        show.run();
+        row.setOnClickListener(r -> {
+            prefs.putBool(key, !prefs.getBool(key));
+            show.run();
+        });
+        return row;
+    }
+
+    private View appRow(App a) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+
+        LinearLayout main = new LinearLayout(this);
+        main.setOrientation(LinearLayout.HORIZONTAL);
+        main.setGravity(Gravity.CENTER_VERTICAL);
+        main.setPadding(dp(10), dp(6), dp(12), dp(6));
+        main.setFocusable(true);
+        main.setBackground(rowBg(0x26FFFFFF));
+        ImageView icon = new ImageView(this);
+        icon.setImageDrawable(a.icon);
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), view.getWidth() * 0.225f);
             }
         });
-        followThemeChoice = findViewById(R.id.followThemeChoice);
-        followThemeChoice.setOnClickListener(v -> {
-            if (!hasOnTvChoices()) return;
-            choices.edit().remove("columns").remove(Config.ROWS_BELOW_DOCK_KEY).remove("animations")
-                    .remove("advanced_effects").remove(Config.WALLPAPER_CHOICE_KEY).commit();
-            Config current = Config.load(this);
-            columns = current.columns;
-            rowsBelowDock = current.rowsBelowDock;
-            animations = current.animations;
-            advancedEffects = current.animations && current.advancedEffects;
-            setResult(RESULT_OK);
-            refresh();
+        icon.setClipToOutline(true);
+        main.addView(icon, new LinearLayout.LayoutParams(dp(32), dp(32)));
+        TextView label = text(a.label, 15, 0xE6FFFFFF, 400);
+        label.setSingleLine(true);
+        label.setPadding(dp(12), 0, 0, 0);
+        label.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        main.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        TextView grip = text("", 14, 0xB3FFFFFF, 500);
+        main.addView(grip);
+        row.addView(main, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+        TextView vis = text("", 13, 0xFFFFFFFF, 500);
+        vis.setGravity(Gravity.CENTER);
+        vis.setFocusable(true);
+        vis.setPadding(dp(10), dp(8), dp(10), dp(8));
+        vis.setBackground(rowBg(0x33FFFFFF));
+        LinearLayout.LayoutParams visLp = new LinearLayout.LayoutParams(dp(84), ViewGroup.LayoutParams.WRAP_CONTENT);
+        visLp.leftMargin = dp(10);
+        row.addView(vis, visLp);
+
+        Runnable show = () -> {
+            boolean h = hidden.contains(a.pkg);
+            vis.setText(h ? R.string.ls_hidden : R.string.ls_shown);
+            main.setAlpha(h ? 0.45f : 1f);
+            grip.setText(moving == row ? getString(R.string.ls_moving) : "");
+            main.setBackground(rowBg(moving == row ? 0x5C0A84FF : 0x26FFFFFF));
+        };
+        show.run();
+        row.setTag(show);
+
+        vis.setOnClickListener(v -> {
+            if (!hidden.remove(a.pkg)) hidden.add(a.pkg);
+            prefs.putHidden(hidden);
+            show.run();
         });
-        findViewById(R.id.defaultHomeChoice).setOnClickListener(v -> {
-            Toast.makeText(this, R.string.home_settings_help, Toast.LENGTH_LONG).show();
-            open(new Intent(Settings.ACTION_HOME_SETTINGS));
+        main.setOnClickListener(v -> {
+            View was = moving;
+            moving = moving == row ? null : row;
+            if (was != null && was != row) ((Runnable) was.getTag()).run();
+            show.run();
         });
-        findViewById(R.id.tvSettingsChoice).setOnClickListener(v ->
-                open(new Intent(Settings.ACTION_SETTINGS)));
-        refresh();
-        columnChoices[Math.max(0, Math.min(columns - 4, 3))].requestFocus();
+        main.setOnKeyListener((v, keyCode, e) -> {
+            if (moving != row || e.getAction() != KeyEvent.ACTION_DOWN) return false;
+            if (keyCode == KeyEvent.KEYCODE_BACK) {
+                moving = null;
+                show.run();
+                return true;
+            }
+            int d = keyCode == KeyEvent.KEYCODE_DPAD_UP ? -1 : keyCode == KeyEvent.KEYCODE_DPAD_DOWN ? 1 : 0;
+            if (d == 0) return keyCode == KeyEvent.KEYCODE_DPAD_LEFT || keyCode == KeyEvent.KEYCODE_DPAD_RIGHT;
+            int i = appRows.indexOfChild(row), j = i + d;
+            if (j < 0 || j >= appRows.getChildCount()) return true;
+            appRows.removeViewAt(i);
+            appRows.addView(row, j);
+            Collections.swap(apps, i, j);
+            List<String> order = new ArrayList<>();
+            for (App x : apps) order.add(x.pkg);
+            prefs.putOrder(order);
+            main.requestFocus();
+            return true;
+        });
+        return row;
     }
 
-    private void reverseRow(TextView[] views) {
-        LinearLayout row = (LinearLayout) views[0].getParent();
-        row.removeAllViews();
-        for (int i = views.length - 1; i >= 0; i--) row.addView(views[i]);
+    /** A focusable label/value row. */
+    private View row(TextView label, TextView value) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(14), dp(11), dp(14), dp(11));
+        row.setFocusable(true);
+        row.setBackground(rowBg(0x26FFFFFF));
+        row.addView(label, new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        if (value != null) row.addView(value);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT);
+        lp.bottomMargin = dp(4);
+        row.setLayoutParams(lp);
+        return row;
     }
 
-    private void showWallpaperPicker() {
-        File dir = Config.dir(this);
-        List<File> images = new java.util.ArrayList<>(WallpaperRotation.images(
-                dir == null ? null : new File(dir, "wallpapers")));
-        // A theme with a single wallpaper.jpg offers that picture too (Config maps the choice back to it).
-        File single = dir == null ? null : new File(dir, Config.WALLPAPER_NAME);
-        if (single != null && single.isFile()) images.add(0, single);
-        String[] labels = new String[images.size() + 1];
-        for (int i = 0; i < images.size(); i++) labels[i] = images.get(i).getName();
-        labels[images.size()] = getString(R.string.wallpaper_none);
-        String current = choices.getString(Config.WALLPAPER_CHOICE_KEY, null);
-        int checked = "none".equals(current) ? images.size()
-                : indexOf(images, current);
-        new AlertDialog.Builder(this)
-                .setTitle(R.string.wallpaper_label)
-                .setSingleChoiceItems(labels, checked, (dialog, which) -> {
-                    dialog.dismiss();
-                    if (which == images.size()) {
-                        choices.edit().putString(Config.WALLPAPER_CHOICE_KEY, "none").apply();
-                    } else {
-                        choices.edit().putString(Config.WALLPAPER_CHOICE_KEY,
-                                images.get(which).getName()).apply();
-                    }
-                    setResult(RESULT_OK);
-                    Toast.makeText(this, R.string.wallpaper_applied, Toast.LENGTH_SHORT).show();
-                    refresh();
-                })
-                .setNeutralButton(R.string.wallpaper_theme_default, (dialog, which) -> {
-                    choices.edit().remove(Config.WALLPAPER_CHOICE_KEY).apply();
-                    setResult(RESULT_OK);
-                    refresh();
-                })
-                .setNegativeButton(android.R.string.cancel, null)
-                .show();
+    private TextView section(int res) {
+        TextView t = text(getString(res).toUpperCase(), 11, 0x8CFFFFFF, 600);
+        t.setLetterSpacing(0.18f);
+        t.setPadding(dp(4), dp(20), 0, dp(6));
+        return t;
     }
 
-    private static int indexOf(List<File> images, String name) {
-        if (name == null) return -1;
-        for (int i = 0; i < images.size(); i++) {
-            if (images.get(i).getName().equals(name)) return i;
+    private TextView text(String s, int sp, int color, int weight) {
+        TextView t = new TextView(this);
+        t.setText(s);
+        t.setTextSize(sp);
+        t.setTextColor(color);
+        t.setTypeface(font);
+        t.setFontVariationSettings("'wght' " + weight);   // Outfit is a variable font, as on Home
+        return t;
+    }
+
+    /** Clear at rest, a soft white slab when focused, an optional tint when selected. */
+    private StateListDrawable rowBg(int selectedColor) {
+        StateListDrawable s = new StateListDrawable();
+        s.addState(new int[]{android.R.attr.state_focused}, rounded(selectedColor == 0x26FFFFFF ? 0x2EFFFFFF : selectedColor, true));
+        s.addState(new int[]{}, rounded(selectedColor == 0x26FFFFFF ? 0x00000000 : selectedColor, false));
+        return s;
+    }
+
+    private GradientDrawable rounded(int color, boolean edge) {
+        GradientDrawable g = new GradientDrawable();
+        g.setColor(color);
+        g.setCornerRadius(dp(14));
+        if (edge) g.setStroke(Math.max(1, dp(1)), 0x59FFFFFF);
+        return g;
+    }
+
+    private int dp(float v) {
+        return Math.round(v * density);
+    }
+
+    // ---- apps ------------------------------------------------------------------------------------
+
+    /** The same apps and order as the dock (Settings, which always closes it, is not listed). */
+    private void loadApps() {
+        apps.clear();
+        PackageManager pm = getPackageManager();
+        Config cfg = Config.load(this);
+        List<ResolveInfo> found = pm.queryIntentActivities(
+                new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER), 0);
+        Set<String> seen = new HashSet<>();
+        for (ResolveInfo ri : found) {
+            String pkg = ri.activityInfo.packageName;
+            if (pkg.equals(getPackageName()) || pkg.equals("com.android.tv.settings")
+                    || cfg.hiddenApps.contains(pkg) || !seen.add(pkg)) continue;
+            Drawable custom = CustomIcons.forPackage(this, pkg);
+            apps.add(new App(pkg, String.valueOf(ri.loadLabel(pm)), custom != null ? custom : ri.loadIcon(pm)));
         }
-        return -1;
+        List<String> order = prefs.order();
+        Collections.sort(apps, (a, b) -> LauncherPrefs.compare(a.pkg, a.label, b.pkg, b.label, order, cfg.dockApps));
     }
 
-    private void setAdvanced(boolean enabled) {
-        advancedEffects = enabled;
-        choices.edit().putBoolean("advanced_effects", enabled).apply();
-        setResult(RESULT_OK);
-        refresh();
-    }
-
-    private void refresh() {
-        for (int i = 0; i < columnChoices.length; i++) {
-            columnChoices[i].setSelected(columns == i + 4);
+    @Override
+    public void onBackPressed() {
+        if (moving != null) {
+            View was = moving;
+            moving = null;
+            ((Runnable) was.getTag()).run();
+            return;
         }
-        for (int i = 0; i < rowChoices.length; i++) {
-            rowChoices[i].setSelected(rowsBelowDock == i);
-        }
-        animationsChoice.setText(getString(R.string.animations_state,
-                getString(animations ? R.string.on : R.string.off)));
-        advancedChoice.setText(getString(R.string.advanced_effects_state,
-                getString(advancedEffects ? R.string.on : R.string.off)));
-        advancedChoice.setEnabled(animations);
-        advancedChoice.setAlpha(animations ? 1f : 0.5f);
-        String wallpaperCurrent = choices.getString(Config.WALLPAPER_CHOICE_KEY, null);
-        wallpaperChoice.setText(getString(R.string.wallpaper_state,
-                "none".equals(wallpaperCurrent) ? getString(R.string.wallpaper_none)
-                        : wallpaperCurrent != null ? wallpaperCurrent
-                        : getString(R.string.wallpaper_theme_default)));
-        followThemeChoice.setSelected(!hasOnTvChoices());
-    }
-
-    private boolean hasOnTvChoices() {
-        return choices.contains("columns") || choices.contains(Config.ROWS_BELOW_DOCK_KEY)
-                || choices.contains("animations") || choices.contains("advanced_effects")
-                || choices.contains(Config.WALLPAPER_CHOICE_KEY);
-    }
-
-    private void open(Intent intent) {
-        try {
-            startActivity(intent);
-        } catch (ActivityNotFoundException | SecurityException e) {
-            Toast.makeText(this, R.string.not_available, Toast.LENGTH_LONG).show();
-        }
+        super.onBackPressed();
     }
 }
