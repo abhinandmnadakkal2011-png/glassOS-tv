@@ -80,7 +80,8 @@ class ExampleListsTest(unittest.TestCase):
     def test_readme_counts(self):
         text = (ROOT / "README.md").read_text(encoding="utf-8")
         n = len(folders())
-        self.assertIn(f"{n} TV models", text, "stat strip alt text is stale (regenerate docs/stats.png too)")
+        self.assertIn(f"{n} TV lists", text, "nav link count is stale")
+        self.assertIn(f"{n} TVs with tested lists", text, "numbers line is stale")
 
 
 if __name__ == "__main__":

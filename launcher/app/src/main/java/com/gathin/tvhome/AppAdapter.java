@@ -1,6 +1,5 @@
 package com.gathin.tvhome;
 
-import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.ComponentName;
 import android.content.Context;
@@ -12,9 +11,13 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Outline;
-import android.graphics.PixelFormat;
 import android.graphics.Rect;
+import android.graphics.drawable.AdaptiveIconDrawable;
+import android.graphics.drawable.BitmapDrawable;
+import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.LayerDrawable;
 import android.net.Uri;
 import android.provider.Settings;
 import android.util.DisplayMetrics;
@@ -25,6 +28,7 @@ import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.view.animation.DecelerateInterpolator;
 import android.view.animation.OvershootInterpolator;
+import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -42,11 +46,10 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * App tiles. The first {@link MainActivity#COLUMNS} positions are the pinned dock (favourites, fixed order,
- * then empty slots up to a full row, see {@link DockSlots}), then the module cards the owner chose to show
- * (by label), the rest is alphabetical.
+ * App tiles. The first {@link MainActivity#COLUMNS} positions are the pinned dock (favourites, fixed order),
+ * then the module cards the owner chose to show (by label), the rest is alphabetical.
  */
-public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
+public class AppAdapter extends RecyclerView.Adapter<AppAdapter.Holder> {
 
     interface TileListener {
         void onTileFocused(int position, View card);
@@ -54,13 +57,15 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         /** Called for a D-pad direction key on a tile. Return true when handled (focus stays put). */
         boolean onTileVerticalKey(int position, int keyCode);
 
-        void onLibraryRequested();
-        void onLibraryFocused();
-        void onLibraryUp();
+        /** The Settings icon at the end of the dock. */
+        void onOpenSettings();
+
+        /** Holding OK on the Settings icon: the launcher's own settings. */
+        void onOpenLauncherSettings();
     }
 
     static final class Entry {
-        static final int APP = 0, HOME_SETTINGS = 1, CARD = 2, EMPTY = 3;
+        static final int APP = 0, HOME_SETTINGS = 1, CARD = 2, SETTINGS = 3;
 
         final int kind;
         final String label;
@@ -72,6 +77,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         final String name;
         /** Ambient glow colour; 0 until sampled from the banner, or the card's accent from the start. */
         int ambient;
+        /** The icon as the dock draws it, built on first bind. */
+        Drawable dockIcon;
 
         Entry(String label, ComponentName component, Drawable banner, Drawable icon) {
             this(APP, label, component, banner, icon, null, 0);
@@ -105,121 +112,52 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         return Math.max(Math.round(80 * density), Math.min(design, fit));
     }
 
+    /** Dock icons: macOS-style squares, packed together in the middle of the screen (see DockDecoration). */
+    /** Set from LauncherPrefs when Home starts (the defaults live there). */
+    static float DOCK_DP = 66f, DOCK_GAP_DP = 18f;
+    /** Icons visible in the dock at once; the rest scroll. */
+    static int DOCK_VISIBLE = 8;
+    private static final String TV_SETTINGS_PKG = "com.android.tv.settings";
+    private static final int TYPE_TILE = 0, TYPE_DOCK = 1;
+
+    static int dockTilePx(float density) {
+        return Math.round(DOCK_DP * density);
+    }
+
     static int tileHeightPx(int tileWidthPx) {
         return Math.round(tileWidthPx * DESIGN_H_DP / DESIGN_W_DP);
     }
 
     /** Height of one grid item: the tile, the name label under it and the item's own padding. */
     static int itemHeightPx(int tileHeightPx, float density) {
-        return itemHeightPx(tileHeightPx, true, density);
+        return tileHeightPx + Math.round(45 * density);
     }
-
-    /** The same for either layout: the plain grid (dock_row false) uses the compact spacing. */
-    static int itemHeightPx(int tileHeightPx, boolean dockRow, float density) {
-        return tileHeightPx + Math.round((dockRow ? ITEM_EXTRA_DP : COMPACT_ITEM_EXTRA_DP) * density);
-    }
-
-    /**
-     * dock_row false: 4dp padding above and below, a 4dp gap and a 20dp name label, and 16dp kept under the last
-     * row. The plain grid fits more rows on the screen, and with item_app.xml's roomier spacing the tiles came
-     * out small with wide gaps between them.
-     */
-    static final float COMPACT_ITEM_EXTRA_DP = 4 + 4 + 4 + 20;
-    static final float COMPACT_BOTTOM_ROOM_DP = 16;
-
-    /** item_app.xml: 8dp padding above and below, a 7dp gap and the 22dp name label under the tile. */
-    static final float ITEM_EXTRA_DP = 45;
-    /** DockDecoration's offsets above and below the dock row. */
-    static final float DOCK_EXTRA_DP = 6 + 12;
-    /** Room kept under the last row rows_below_dock asks for (MainActivity places the dock with the same). */
-    static final float BOTTOM_ROOM_DP = 30;
-    /** Room kept above the dock for the dock title (48sp hero name plus its 40dp gap) when dock_title is on. */
-    static final float TITLE_ROOM_DP = 104;
-    /** dock_row false: room above the first row for its zoom and glass (MainActivity places the grid with it). */
-    static final float TOP_ROOM_DP = 12;
-
-    /**
-     * Tile width that fits the columns across and, with rows_below_dock > 0, the dock (with its title above it,
-     * if shown) plus that many rows down the grid's height; the smaller wins. With rows_below_dock = 0, or before
-     * the grid has a height, only the width counts, as before. Without this, 2 or 3 rows below the dock did not
-     * fit: the dock was pushed to the top and its title drew over the clock. With dock_row false there is no band
-     * or title to make room for: the first row plus rows_below_dock rows fit under a small top margin.
-     */
-    static int tileWidthPx(int innerWidthPx, int gridHeightPx, int columns, int rowsBelowDock, boolean dockTitle,
-                           boolean dockRow, float density) {
-        int w = tileWidthPx(innerWidthPx, columns, density);
-        if (gridHeightPx <= 0 || rowsBelowDock <= 0) return w;
-        float reserved = (dockRow ? DOCK_EXTRA_DP + BOTTOM_ROOM_DP + (dockTitle ? TITLE_ROOM_DP : 0)
-                : TOP_ROOM_DP + COMPACT_BOTTOM_ROOM_DP) * density;
-        float perItem = (gridHeightPx - reserved) / (rowsBelowDock + 1);
-        float tileH = perItem - (dockRow ? ITEM_EXTRA_DP : COMPACT_ITEM_EXTRA_DP) * density;
-        int byHeight = Math.round(tileH * DESIGN_W_DP / DESIGN_H_DP);
-        // Shrink at most to MIN_HEIGHT_FIT of the width-only size. Below that the tiles look lost in their wide
-        // columns (2 rows under a titled dock came out at 80dp); the rows that still don't fit run off the bottom
-        // and scroll, and MainActivity keeps the title's room above the dock.
-        return Math.max(Math.max(Math.round(80 * density), Math.round(w * MIN_HEIGHT_FIT)), Math.min(w, byHeight));
-    }
-
-    /** The smallest share of the width-only tile size that fitting rows_below_dock into the height may go to. */
-    static final float MIN_HEIGHT_FIT = 0.85f;
 
     private final Context ctx;
-    private final int rowsBelowDock;
-    private final boolean dockTitle;
-    /** The owner's saved order (reorder button, Order): key -> rank. Empty when there is none or it no longer applies. */
-    private Map<String, Integer> savedRanks = Collections.emptyMap();
-    /** Reorder mode: no empty dock slots, so every position holds a tile that can move. */
-    private boolean reordering;
     private final TileListener listener;
     private final int dockSize;
-    /** config dock_row: false makes the dock apps the first tiles of one plain grid (names shown, no empty slots). */
-    private final boolean dockRow;
-    /** config always_show_names: the alpha of an unfocused tile's name (0 hides it). */
-    private final float restNameAlpha;
-    /** cinematic_home: only then does a launch record the last-opened app the shelf uses. */
-    private final boolean cinematic;
     /** Dock order (config.xml dock_apps, or a theme's config.json). */
     private final List<String> favourites;
-    /** Grid apps fill the dock slots dock_apps leaves free (config.xml, fill_dock). */
-    private final boolean fillDock;
-    /** Dock apps found at the last reload, and the empty slots after them. */
-    private int docked, emptySlots;
     /** Never shown as tiles (res/values/config.xml, hidden_apps). */
     private final Set<String> hidden;
-    private final boolean animations;
-    private final boolean advancedEffects;
-    private final boolean showLibrary;
-    /** Packages with a leanback entry at the last reload(): their tiles launch with the leanback category. */
-    private Set<String> leanbackPackages = new HashSet<>();
     private final boolean showHomeSettings;
     /** Calmer motion for weak GPUs (config.xml, reduced_motion): no overshoot, shorter fades. */
     private final boolean reducedMotion;
-    /** Package to the action its tile sends instead of the start screen (config.xml, launch_actions). */
-    private final Map<String, String> launchActions;
-    /** Tile names and bundled banners that replace the app's own (config.xml, app_labels and app_banners). */
-    private final Map<String, String> appLabels, appBanners;
     private final List<Entry> items = new ArrayList<>();
+    /** Icon style and tint from Home settings (IconThemes). */
+    private final int iconTheme, iconTint;
 
     AppAdapter(Context ctx, TileListener listener, int dockSize, Config cfg) {
         this.ctx = ctx;
         this.listener = listener;
         this.dockSize = dockSize;
         this.favourites = cfg.dockApps;
-        this.fillDock = cfg.fillDock;
         this.hidden = new HashSet<>(cfg.hiddenApps);
-        this.animations = cfg.animations;
-        this.advancedEffects = cfg.animations && cfg.advancedEffects;
         this.showHomeSettings = cfg.showHomeSettingsShortcut;
-        this.showLibrary = cfg.appLibrary;
         this.reducedMotion = cfg.reducedMotion;
-        this.rowsBelowDock = cfg.rowsBelowDock;
-        this.dockTitle = cfg.dockTitle;
-        this.dockRow = cfg.dockRow;
-        this.restNameAlpha = cfg.alwaysShowNames ? 0.75f : 0f;
-        this.cinematic = cfg.cinematicHome;
-        this.launchActions = cfg.launchActions;
-        this.appLabels = cfg.appLabels;
-        this.appBanners = cfg.appBanners;
+        LauncherPrefs prefs = LauncherPrefs.get(ctx);
+        this.iconTheme = prefs.getInt(LauncherPrefs.ICON_THEME, LauncherPrefs.DEF_ICON_THEME);
+        this.iconTint = IconThemes.tint(prefs.getInt(LauncherPrefs.ICON_TINT, LauncherPrefs.DEF_ICON_TINT));
         // Tiles keep their identity across reload(), so a focused tile stays on its app instead of
         // its view being rebound to whatever app now sits in that slot.
         setHasStableIds(true);
@@ -229,58 +167,42 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
      * Rebuilds the tiles. A shown module card stands in for every tile of its package (same component,
      * so focus follows it); hidden_apps wins over a card, and a card's package in dock_apps takes that slot.
      */
-    void reload(List<Cards.Card> cards, List<ResolveInfo> leanback) {
+    void reload(List<Cards.Card> cards) {
         PackageManager pm = ctx.getPackageManager();
-        // The LEANBACK query is shared with the module-card check (MainActivity); copy it before adding
-        // library apps so the caller's list stays as it was.
-        List<ResolveInfo> found = new ArrayList<>(leanback);
-        Set<String> tvPackages = new HashSet<>();
-        for (ResolveInfo ri : found) if (ri.activityInfo != null) tvPackages.add(ri.activityInfo.packageName);
-        leanbackPackages = tvPackages;
-        Set<String> added = LibraryApps.load(ctx);
-        Set<String> removed = LibraryApps.loadRemoved(ctx);
-        if (!added.isEmpty()) {
-            Set<String> seen = new HashSet<>(tvPackages);
-            for (ResolveInfo ri : pm.queryIntentActivities(
-                    new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER), 0)) {
-                if (ri.activityInfo != null && added.contains(ri.activityInfo.packageName)
-                        && seen.add(ri.activityInfo.packageName)) found.add(ri);
-            }
-        }
+        Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
+        List<ResolveInfo> found = pm.queryIntentActivities(probe, 0);
+        LauncherPrefs prefs = LauncherPrefs.get(ctx);
+        Set<String> hiddenByOwner = prefs.hidden();
+        List<String> order = prefs.order();
         Map<String, Cards.Card> cardByPkg = new HashMap<>();
         for (Cards.Card c : cards) cardByPkg.put(c.pkg, c);
         List<Entry> fresh = new ArrayList<>();
-        // Some system apps declare two leanback entry points under one name (Sony's Timers & Clock on the
-        // BRAVIA VU31), which would show as two identical tiles: keep the first per package and label.
-        Set<String> seen = new HashSet<>();
         for (ResolveInfo ri : found) {
             if (ri.activityInfo == null) continue;
             String pkg = ri.activityInfo.packageName;
-            if (pkg.equals(ctx.getPackageName()) || !ri.activityInfo.exported
-                    || !LibraryApps.visible(tvPackages.contains(pkg), hidden.contains(pkg), added.contains(pkg), removed.contains(pkg))) continue;
+            if (pkg.equals(ctx.getPackageName()) || hidden.contains(pkg) || hiddenByOwner.contains(pkg)
+                    || pkg.equals(TV_SETTINGS_PKG)) continue;
             ComponentName component = new ComponentName(pkg, ri.activityInfo.name);
             Cards.Card card = cardByPkg.get(pkg);
             if (card != null && !card.component.equals(component)) continue;   // the card stands in for this tile
-            // Same cleaner as the card prompt: an app label with a bidi override or line separator must not
-            // redraw the tile name as something else (#117).
-            String label = card != null ? card.label : Cards.cleanLabel(
-                    appLabels.containsKey(pkg) ? appLabels.get(pkg) : String.valueOf(ri.loadLabel(pm)), pkg);
-            if (!seen.add(pkg + '\n' + label)) continue;
-            Drawable banner = bundledBanner(appBanners.get(pkg));
-            if (banner == null) banner = loadBanner(pm, ri);
-            // The icon is only drawn (and sampled for the glow) when there is no banner, so a tile with a
-            // banner skips loading and decoding it.
-            Drawable icon = banner == null ? ri.loadIcon(pm) : null;
+            Drawable banner = loadBanner(pm, ri);
+            Drawable icon = ri.loadIcon(pm);
             if (card != null) {
-                fresh.add(new Entry(Entry.CARD, label, component, banner, icon, card.caption, card.accent));
+                fresh.add(new Entry(Entry.CARD, card.label, component, banner, icon, card.caption, card.accent));
             } else {
-                fresh.add(new Entry(label, component, banner, icon));
+                // Same cleaner as the card prompt: an app label with a bidi override or line separator must not
+                // redraw the tile name as something else (#117).
+                fresh.add(new Entry(Cards.cleanLabel(String.valueOf(ri.loadLabel(pm)), pkg), component, banner, icon));
             }
         }
         Collections.sort(fresh, (a, b) -> {
-            // The owner's own order first; tiles it does not know (new installs) follow by the rule below.
-            int saved = Order.compare(savedRanks, a.component.flattenToShortString(), b.component.flattenToShortString());
-            if (saved != 0) return saved;
+            // The owner's arrangement from the launcher settings wins over everything else.
+            int oa = order.indexOf(a.pkg), ob = order.indexOf(b.pkg);
+            if (oa >= 0 || ob >= 0) {
+                if (oa < 0) return 1;
+                if (ob < 0) return -1;
+                return Integer.compare(oa, ob);
+            }
             int fa = favourites.indexOf(a.pkg), fb = favourites.indexOf(b.pkg);
             if (fa >= 0 || fb >= 0) {
                 if (fa < 0) return 1;
@@ -292,85 +214,61 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             if (ca != cb) return ca ? -1 : 1;
             return a.label.compareToIgnoreCase(b.label);
         });
-        // Retain the optional Default-home tile until dependent tile-ordering work is merged.
+        // Optional "Default home" tile (config.xml), only when this TV actually has a home-screen picker.
         if (showHomeSettings
                 && pm.resolveActivity(new Intent(Settings.ACTION_HOME_SETTINGS), 0) != null) {
             fresh.add(new Entry(Entry.HOME_SETTINGS, ctx.getString(R.string.home_settings),
                     new ComponentName(ctx, HomeSettingsActivity.class), null,
                     ctx.getDrawable(R.drawable.ic_home_settings), null, 0));
         }
-        docked = 0;
-        while (docked < fresh.size() && favourites.contains(fresh.get(docked).pkg)) docked++;
-        emptySlots = dockRow && !reordering ? DockSlots.empty(docked, dockSize, fresh.size(), fillDock) : 0;
-        for (int i = 0; i < emptySlots; i++) {
-            fresh.add(docked + i, new Entry(Entry.EMPTY, "", new ComponentName(ctx, "empty-dock-slot-" + i),
-                    null, null, null, 0));
-        }
+        // Settings always closes the dock.
+        fresh.add(new Entry(Entry.SETTINGS, ctx.getString(R.string.settings),
+                new ComponentName(TV_SETTINGS_PKG, "settings"), null, settingsIcon(), null, 0xFF8E8E93));
         items.clear();
         items.addAll(fresh);
         notifyDataSetChanged();
     }
 
-    /** A banner_* drawable bundled with the launcher, or null for none or a name that is not one. */
-    private Drawable bundledBanner(String name) {
-        if (name == null || !name.startsWith("banner_")) return null;
-        int id = ctx.getResources().getIdentifier(name, "drawable", ctx.getPackageName());
-        return id != 0 ? ctx.getDrawable(id) : null;
-    }
-
     private Drawable loadBanner(PackageManager pm, ResolveInfo ri) {
         int id = ri.activityInfo.banner;
         if (id == 0) id = ri.activityInfo.applicationInfo.banner;
-        Drawable banner = null;
         if (id != 0) {
             try {
                 Resources resources = pm.getResourcesForApplication(ri.activityInfo.applicationInfo);
                 // Keep at least xhdpi detail rather than downsampling artwork before the focus zoom.
                 int density = Math.max(DisplayMetrics.DENSITY_XHIGH, ctx.getResources().getDisplayMetrics().densityDpi);
-                banner = resources.getDrawableForDensity(id, density, null);
+                return resources.getDrawableForDensity(id, density, null);
             } catch (PackageManager.NameNotFoundException | Resources.NotFoundException ignored) {
             }
         }
-        if (banner == null) banner = ri.activityInfo.loadBanner(pm);
-        // A square "banner" counts as none: the tile shows the app's icon and name instead of a blur.
-        return banner != null && isBannerShaped(banner.getIntrinsicWidth(), banner.getIntrinsicHeight()) ? banner : null;
-    }
-
-    /**
-     * Some apps declare a small square image as their banner (Rockchip's Media Center ships a 64 px one). Cropped
-     * over a 16:9 tile it is a blur. A drawable with no intrinsic size (a colour, a shape) still fills the tile.
-     */
-    static boolean isBannerShaped(int width, int height) {
-        return width <= 0 || height <= 0 || width >= height * 1.4f;
-    }
-
-    /** Lets go of every tile and its artwork (Home is in the background and memory is short). */
-    void clear() {
-        items.clear();
-        notifyDataSetChanged();
+        return ri.activityInfo.loadBanner(pm);
     }
 
     @NonNull
     @Override
-    public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-        if (viewType == 1) {
-            View row = LayoutInflater.from(ctx).inflate(R.layout.row_app_library, parent, false);
-            View button = row.findViewById(R.id.btnLibrary);
-            button.setOnClickListener(v -> listener.onLibraryRequested());
-            button.setOnFocusChangeListener((v, focused) -> { if (focused) listener.onLibraryFocused(); });
-            button.setOnKeyListener((v, key, event) -> {
-                if (event.getAction() != KeyEvent.ACTION_DOWN) return false;
-                if (key == KeyEvent.KEYCODE_DPAD_UP) listener.onLibraryUp();
-                return key == KeyEvent.KEYCODE_DPAD_UP || key == KeyEvent.KEYCODE_DPAD_DOWN
-                        || key == KeyEvent.KEYCODE_DPAD_LEFT || key == KeyEvent.KEYCODE_DPAD_RIGHT;
-            });
-            return new RecyclerView.ViewHolder(row) { };
-        }
+    public Holder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
         View v = LayoutInflater.from(parent.getContext()).inflate(R.layout.item_app, parent, false);
         float density = parent.getResources().getDisplayMetrics().density;
         int width = parent.getWidth() > 0 ? parent.getWidth() : parent.getMeasuredWidth();
         int inner = width - parent.getPaddingLeft() - parent.getPaddingRight();
-        int w = tileWidthPx(inner, parent.getHeight(), dockSize, rowsBelowDock, dockTitle, dockRow, density), h = tileHeightPx(w);
+        int w = tileWidthPx(inner, dockSize, density), h = tileHeightPx(w);
+        if (viewType == TYPE_DOCK) {
+            w = h = dockTilePx(density);
+            // A sideways dock: each item is its icon plus the gap (not the whole list), so the focus zoom
+            // fits inside the item; the dock clips children to their bounds at its scrolling ends.
+            ViewGroup.LayoutParams itemLp = v.getLayoutParams();
+            itemLp.width = w + Math.round(DOCK_GAP_DP * density);
+            v.setLayoutParams(itemLp);
+            // Liquid glass rim and sheen over the icon (Home settings: Glass icon edges).
+            LauncherPrefs prefs = LauncherPrefs.get(ctx);
+            // Clear icons are see-through glass: no dark tile behind them.
+            if (iconTheme == IconThemes.CLEAR) v.findViewById(R.id.card).setBackground(null);
+            if (prefs.getBool(LauncherPrefs.ICON_GLASS)) {
+                int edge = prefs.getInt(LauncherPrefs.GLASS_EDGE, LauncherPrefs.DEF_GLASS_EDGE);
+                int bright = prefs.getInt(LauncherPrefs.GLASS_BRIGHT, LauncherPrefs.DEF_GLASS_BRIGHT);
+                ((FrameLayout) v.findViewById(R.id.card)).setForeground(new GlassEdgeDrawable(density, edge, bright));
+            }
+        }
         View card = v.findViewById(R.id.card);
         ViewGroup.LayoutParams cardLp = card.getLayoutParams();
         cardLp.width = w;
@@ -379,50 +277,45 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         View name = v.findViewById(R.id.name);
         ViewGroup.MarginLayoutParams nameLp = (ViewGroup.MarginLayoutParams) name.getLayoutParams();
         nameLp.width = w;
-        nameLp.topMargin = h + Math.round((dockRow ? 7 : 4) * density);
-        if (!dockRow) {
-            // Compact spacing (COMPACT_ITEM_EXTRA_DP): 4dp item padding and a 20dp name instead of 8dp and 22dp.
-            nameLp.height = Math.round(20 * density);
-            int pad = Math.round(4 * density);
-            v.setPadding(v.getPaddingLeft(), pad, v.getPaddingRight(), pad);
-        }
+        nameLp.topMargin = h + Math.round(7 * density);
         name.setLayoutParams(nameLp);
-        return new Holder(v, listener, animations, advancedEffects, reducedMotion, restNameAlpha);
+        return new Holder(v, listener, reducedMotion);
     }
 
     @Override
-    public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
-        if (isLibraryAt(position)) return;
-        Holder h = (Holder) holder;
+    public int getItemViewType(int position) {
+        return position < dockSize ? TYPE_DOCK : TYPE_TILE;
+    }
+
+    @Override
+    public void onBindViewHolder(@NonNull Holder h, int position) {
         Entry e = items.get(position);
-        if (e.kind == Entry.EMPTY) {
-            // A free dock slot keeps its place in the row and the band, but shows nothing and takes no focus.
-            h.card.setVisibility(View.INVISIBLE);
-            h.card.setFocusable(false);
-            h.name.setVisibility(View.INVISIBLE);
-            h.banner.setImageDrawable(null);
-            h.icon.setImageDrawable(null);
-            h.card.setOnClickListener(null);
-            h.card.setOnLongClickListener(null);
-            return;
-        }
-        h.card.setVisibility(View.VISIBLE);
-        h.card.setFocusable(true);
         h.name.setText(e.name);
-        // The dock has no labels, unless always_show_names asks for them (DockDecoration then makes room in the band).
-        h.name.setVisibility(dockRow && position < dockSize && restNameAlpha == 0f ? View.INVISIBLE : View.VISIBLE);
+        h.name.setVisibility(position < dockSize ? View.INVISIBLE : View.VISIBLE);   // the dock has no labels
         boolean focused = h.card.isFocused();   // a rebind after reload() can hit the focused tile
-        h.name.setAlpha(focused ? 1f : restNameAlpha);
-        h.card.setScaleX(focused && animations ? focusScale() : 1f);
-        h.card.setScaleY(focused && animations ? focusScale() : 1f);
-        h.card.setTranslationY(focused && advancedEffects ? -4f * ctx.getResources().getDisplayMetrics().density : 0f);
-        h.card.setTranslationZ(focused && advancedEffects ? 8f * ctx.getResources().getDisplayMetrics().density : 0f);
-        h.banner.setScaleX(focused && advancedEffects ? 1.035f : 1f);
-        h.banner.setScaleY(focused && advancedEffects ? 1.035f : 1f);
-        // A fully opaque banner covers the whole card (centerCrop), so the card's own fill under it is drawn for
-        // nothing on every frame; keep it under banners with transparent parts and under icon tiles.
-        h.card.setBackground(e.banner != null && e.banner.getOpacity() == PixelFormat.OPAQUE ? null : h.cardBackground);
-        if (e.banner != null) {
+        h.name.setAlpha(focused ? 1f : 0f);
+        h.card.setScaleX(focused ? FOCUS_SCALE : 1f);
+        h.card.setScaleY(focused ? FOCUS_SCALE : 1f);
+        if (position < dockSize && e.icon != null) {
+            // Dock: the app icon fills the square; adaptive icons drop the system mask (a circle on Google TV)
+            // and show their layers full bleed, so the tile's rounded outline is the only shape.
+            if (e.dockIcon == null) {
+                Drawable custom = CustomIcons.forPackage(ctx, e.pkg);
+                e.dockIcon = custom != null ? custom
+                        : e.kind == Entry.SETTINGS ? e.icon : fullBleed(e.pkg, e.icon, h.card.getLayoutParams().width);
+                // iOS-style icon look (Home settings: Icon style), made from the icon as the dock draws it.
+                if (iconTheme != IconThemes.ORIGINAL) {
+                    int n = h.card.getLayoutParams().width;   // the size fullBleed's layer insets were made for
+                    e.dockIcon = new BitmapDrawable(ctx.getResources(),
+                            IconThemes.apply(rasterize(e.dockIcon, n).getBitmap(), iconTheme, iconTint));
+                }
+            }
+            h.banner.setScaleType(ImageView.ScaleType.FIT_XY);
+            h.banner.setImageDrawable(e.dockIcon);
+            h.banner.setVisibility(View.VISIBLE);
+            h.icon.setVisibility(View.GONE);
+            h.label.setVisibility(View.GONE);
+        } else if (e.banner != null) {
             h.banner.setImageDrawable(e.banner);
             h.banner.setVisibility(View.VISIBLE);
             h.icon.setVisibility(View.GONE);
@@ -437,6 +330,10 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         }
         h.card.setOnClickListener(v -> launch(e));
         h.card.setOnLongClickListener(v -> {
+            if (e.kind == Entry.SETTINGS) {
+                listener.onOpenLauncherSettings();
+                return true;
+            }
             Intent i = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + e.pkg));
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             try {
@@ -447,31 +344,155 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         });
     }
 
+    /**
+     * A legacy icon cut to its opaque part: many TV apps (Netflix) ship a shape with a transparent margin,
+     * which would sit inside the dock square with dark edges. Square-ish content is stretched to fill.
+     */
+    private Drawable trimmed(Drawable icon, int sizePx) {
+        int n = Math.max(sizePx, 96);
+        Drawable d = icon.getConstantState() != null ? icon.getConstantState().newDrawable().mutate() : icon;
+        Bitmap bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888);
+        d.setBounds(0, 0, n, n);
+        d.draw(new Canvas(bmp));
+        int l = n, t = n, r = -1, b = -1;
+        for (int y = 0; y < n; y++) {
+            for (int x = 0; x < n; x++) {
+                if (Color.alpha(bmp.getPixel(x, y)) < 200) continue;
+                if (x < l) l = x;
+                if (x > r) r = x;
+                if (y < t) t = y;
+                if (y > b) b = y;
+            }
+        }
+        if (r < 0) {
+            bmp.recycle();
+            return icon;
+        }
+        // The icon's own (smaller) rounded corners fall outside the dock's corner radius, so inset a hair.
+        int in = Math.round((r - l) * 0.02f);
+        Bitmap cut = Bitmap.createBitmap(bmp, l + in, t + in, Math.max(1, r - l - 2 * in), Math.max(1, b - t - 2 * in));
+        if (cut != bmp) bmp.recycle();
+        return new BitmapDrawable(ctx.getResources(), cut);
+    }
+
+    /** The package's launcher icon at the highest density it ships, for scaling up without blur. */
+    private Drawable sharpestIcon(String pkg, Drawable fallback) {
+        try {
+            PackageManager pm = ctx.getPackageManager();
+            android.content.pm.ApplicationInfo ai = pm.getApplicationInfo(pkg, 0);
+            Intent tv = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER).setPackage(pkg);
+            ResolveInfo ri = pm.resolveActivity(tv, 0);
+            int id = ri != null && ri.activityInfo.getIconResource() != 0 ? ri.activityInfo.getIconResource() : ai.icon;
+            if (id != 0) return pm.getResourcesForApplication(ai).getDrawableForDensity(id, DisplayMetrics.DENSITY_XXXHIGH, null);
+        } catch (Exception ignored) {
+        }
+        return fallback;
+    }
+
+    private BitmapDrawable rasterize(Drawable d, int n) {
+        Drawable copy = d.getConstantState() != null ? d.getConstantState().newDrawable().mutate() : d;
+        Bitmap bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ARGB_8888);
+        copy.setBounds(0, 0, n, n);
+        copy.setFilterBitmap(true);
+        copy.draw(new Canvas(bmp));
+        return new BitmapDrawable(ctx.getResources(), bmp);
+    }
+
+    /**
+     * A flat icon drawn on black, put on another colour instead: each pixel is treated as its colour
+     * times a coverage (its brightest channel), and the uncovered part filled with the new background.
+     */
+    private Drawable onBackground(Drawable flat, int bg) {
+        if (!(flat instanceof BitmapDrawable)) return flat;
+        Bitmap src = ((BitmapDrawable) flat).getBitmap();
+        Bitmap out = src.copy(Bitmap.Config.ARGB_8888, true);
+        int w = out.getWidth(), h = out.getHeight();
+        int[] px = new int[w * h];
+        out.getPixels(px, 0, w, 0, 0, w, h);
+        int br = Color.red(bg), bgG = Color.green(bg), bb = Color.blue(bg);
+        for (int i = 0; i < px.length; i++) {
+            int c = px[i];
+            int r = Color.red(c), g = Color.green(c), b = Color.blue(c);
+            float t = Math.min(1f, Math.max(r, Math.max(g, b)) / 200f);   // coverage of the artwork
+            px[i] = Color.rgb(Math.min(255, r + Math.round((1 - t) * br)),
+                    Math.min(255, g + Math.round((1 - t) * bgG)),
+                    Math.min(255, b + Math.round((1 - t) * bb)));
+        }
+        out.setPixels(px, 0, w, 0, 0, w, h);
+        return new BitmapDrawable(ctx.getResources(), out);
+    }
+
+    /** macOS System Settings look: a dark gear on a light grey gradient square. */
+    private Drawable settingsIcon() {
+        int size = dockTilePx(ctx.getResources().getDisplayMetrics().density);
+        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                new int[]{0xFFE5E5EA, 0xFFAEAEB2});
+        bg.setSize(size, size);
+        Drawable gear = ctx.getDrawable(R.drawable.ic_settings).mutate();
+        gear.setTint(0xFF3A3A3C);
+        LayerDrawable d = new LayerDrawable(new Drawable[]{bg, gear});
+        int in = Math.round(size * 0.2f);
+        d.setLayerInset(1, in, in, in, in);
+        return d;
+    }
+
+    /** Apps whose TV icon has a background that looks wrong in the dock, and the colour to use instead. */
+    private static final Map<String, Integer> ICON_BACKGROUNDS = new HashMap<>();
+    static {
+        ICON_BACKGROUNDS.put("com.android.vending", 0xFFFFFFFF);   // Play Store: black on Google TV, white elsewhere
+    }
+
+    /** An adaptive icon's layers drawn past the edges like the system does (a quarter each side), unmasked. */
+    private Drawable fullBleed(String pkg, Drawable icon, int sizePx) {
+        Integer bgOverride = ICON_BACKGROUNDS.get(pkg);
+        if (bgOverride != null && !(icon instanceof AdaptiveIconDrawable)) {
+            // The TV activity icon is a flat image; the app's own icon is often the layered phone one.
+            try {
+                Drawable app = ctx.getPackageManager().getApplicationIcon(pkg);
+                if (app instanceof AdaptiveIconDrawable) icon = app;
+            } catch (PackageManager.NameNotFoundException ignored) {
+            }
+            if (!(icon instanceof AdaptiveIconDrawable)) {
+                // Recolour the sharpest copy of the icon, then sit the logo inside the square with a margin.
+                Drawable sharp = sharpestIcon(pkg, icon);
+                LayerDrawable d = new LayerDrawable(new Drawable[]{new ColorDrawable(bgOverride),
+                        onBackground(rasterize(sharp, Math.max(sizePx * 2, 256)), bgOverride)});
+                int in = Math.round(sizePx * 0.12f);
+                d.setLayerInset(1, in, in, in, in);
+                return d;
+            }
+        }
+        if (!(icon instanceof AdaptiveIconDrawable)) return trimmed(icon, sizePx);
+        AdaptiveIconDrawable a = (AdaptiveIconDrawable) icon;
+        List<Drawable> layers = new ArrayList<>();
+        Integer bg = ICON_BACKGROUNDS.get(pkg);
+        if (bg != null) layers.add(new ColorDrawable(bg));
+        else if (a.getBackground() != null) layers.add(a.getBackground());
+        if (a.getForeground() != null) layers.add(a.getForeground());
+        if (layers.isEmpty()) return icon;
+        LayerDrawable d = new LayerDrawable(layers.toArray(new Drawable[0]));
+        int q = -sizePx / 4;
+        for (int i = 0; i < layers.size(); i++) d.setLayerInset(i, q, q, q, q);
+        return d;
+    }
+
     /** Opens the tile's activity by explicit component, with no extras: a card can name nothing else. */
     private void launch(Entry e) {
+        if (e.kind == Entry.SETTINGS) {
+            listener.onOpenSettings();
+            return;
+        }
         if (e.kind == Entry.HOME_SETTINGS) {
             ctx.startActivity(new Intent(ctx, HomeSettingsActivity.class)
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             return;
         }
         Intent i = new Intent(Intent.ACTION_MAIN)
+                .addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER)
                 .setComponent(e.component)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-        // TV apps launch with the same leanback intent as from the stock launcher or the remote, so an app
-        // already running resumes instead of restarting; only phone apps added from the library use plain MAIN.
-        if (leanbackPackages.contains(e.pkg)) i.addCategory(Intent.CATEGORY_LEANBACK_LAUNCHER);
-        String action = launchActions.get(e.pkg);
-        if (action != null) {
-            Intent byAction = new Intent(action).setPackage(e.pkg)
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-            if (ctx.getPackageManager().resolveActivity(byAction, 0) != null) i = byAction;
-        }
         try {
             ctx.startActivity(i);
-            if (cinematic) LastOpened.record(ctx, e.pkg);
-            if (advancedEffects && ctx instanceof Activity) {
-                ((Activity) ctx).overridePendingTransition(R.anim.app_open_enter, R.anim.app_open_exit);
-            }
         } catch (Exception ex) {
             Toast.makeText(ctx, ctx.getString(R.string.cant_open, e.label), Toast.LENGTH_SHORT).show();
         }
@@ -479,65 +500,12 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
     @Override
     public int getItemCount() {
-        return items.size() + (showLibrary ? 1 : 0);
-    }
-
-    int appCount() { return items.size(); }
-
-    boolean isLibraryAt(int position) { return showLibrary && position == items.size(); }
-
-    @Override public int getItemViewType(int position) { return isLibraryAt(position) ? 1 : 0; }
-
-    boolean containsPackage(String pkg) {
-        for (Entry entry : items) if (entry.pkg.equals(pkg)) return true;
-        return false;
+        return items.size();
     }
 
     @Override
     public long getItemId(int position) {
-        return isLibraryAt(position) ? Long.MIN_VALUE : items.get(position).component.flattenToShortString().hashCode();
-    }
-
-    /** Uses this saved order from the next reload() (Order.ranks). */
-    void setSavedOrder(Map<String, Integer> ranks) {
-        savedRanks = ranks;
-    }
-
-    /** Reorder mode on or off; takes effect at the next reload() (empty dock slots are left out while on). */
-    void setReordering(boolean on) {
-        reordering = on;
-    }
-
-    boolean hasEmptySlots() {
-        return emptySlots > 0;
-    }
-
-    /** Tiles that can be moved: everything but the "Default home" tile, which always stays last. */
-    int movableCount() {
-        int n = items.size();
-        return n > 0 && items.get(n - 1).kind == Entry.HOME_SETTINGS ? n - 1 : n;
-    }
-
-    /** Keys of the movable tiles in their current order, for Order (empty dock slots are not tiles). */
-    List<String> movableKeys() {
-        List<String> keys = new ArrayList<>();
-        for (int i = 0; i < movableCount(); i++) {
-            Entry e = items.get(i);
-            if (e.kind != Entry.EMPTY) keys.add(e.component.flattenToShortString());
-        }
-        return keys;
-    }
-
-    /** Moves one tile; the others shift by one. Stable ids keep the moved tile's view (and its focus). */
-    void move(int from, int to) {
-        if (from == to || from < 0 || to < 0 || from >= movableCount() || to >= movableCount()) return;
-        items.add(to, items.remove(from));
-        notifyItemMoved(from, to);
-        // The dock row hides names by position: rebind the tiles whose side of the dock edge changed.
-        if (from < dockSize || to < dockSize) {
-            int lo = Math.min(from, to), hi = Math.max(from, to);
-            notifyItemRangeChanged(lo, hi - lo + 1);
-        }
+        return items.get(position).component.flattenToShortString().hashCode();
     }
 
     /** Stable key for the app at a position (its component), or null. */
@@ -554,33 +522,8 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         return -1;
     }
 
-    /** Dock slots that hold an app: the whole dock unless some slots are empty. */
-    int dockFilled() {
-        return emptySlots > 0 ? docked : dockSize;
-    }
-
-    /** A position focus can land on: an empty dock slot gives the last dock app. */
-    int focusablePosition(int position) {
-        return DockSlots.focusable(position, docked, emptySlots);
-    }
-
     String labelAt(int position) {
         return position >= 0 && position < items.size() ? items.get(position).label : "";
-    }
-
-    String packageAt(int position) {
-        return position >= 0 && position < items.size() ? items.get(position).pkg : null;
-    }
-
-    /** The tile's artwork, its banner or else its icon, for the cinematic shelf's backdrop (HeroArt). */
-    Drawable artworkAt(int position) {
-        if (position < 0 || position >= items.size()) return null;
-        Entry e = items.get(position);
-        return e.banner != null ? e.banner : e.icon;
-    }
-
-    float focusScale() {
-        return !animations ? 1f : advancedEffects ? 1.12f : 1.10f;
     }
 
     /** A vivid colour sampled from the app's banner (or icon), cached per entry; a card's accent when it set one. */
@@ -602,28 +545,25 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
         d.setBounds(0, 0, n, n);
         d.draw(c);
         d.setBounds(saved);
-        int[] px = new int[n * n];
-        bmp.getPixels(px, 0, n, 0, 0, n, n);
-        bmp.recycle();
         float[] hsv = new float[3];
         int best = 0xFF444444;
         float bestScore = -1f;
         long r = 0, g = 0, b = 0;
-        for (int p : px) {
-            int pr = (p >> 16) & 0xFF, pg = (p >> 8) & 0xFF, pb = p & 0xFF;
-            r += pr;
-            g += pg;
-            b += pb;
-            int max = Math.max(pr, Math.max(pg, pb));
-            int min = Math.min(pr, Math.min(pg, pb));
-            float sat = max == 0 ? 0f : (max - min) / (float) max;
-            float val = max / 255f;
-            float score = sat * Math.min(1f, val * 1.4f);   // saturated and not too dark
-            if (score > bestScore) {
-                bestScore = score;
-                best = p;
+        for (int y = 0; y < n; y++) {
+            for (int x = 0; x < n; x++) {
+                int p = bmp.getPixel(x, y);
+                r += Color.red(p);
+                g += Color.green(p);
+                b += Color.blue(p);
+                Color.colorToHSV(p, hsv);
+                float score = hsv[1] * Math.min(1f, hsv[2] * 1.4f);   // saturated and not too dark
+                if (score > bestScore) {
+                    bestScore = score;
+                    best = p;
+                }
             }
         }
+        bmp.recycle();
         if (bestScore < 0.25f) {   // nearly monochrome banner (e.g. white): use its average, lifted
             int avg = Color.rgb((int) (r / (n * n)), (int) (g / (n * n)), (int) (b / (n * n)));
             Color.colorToHSV(avg, hsv);
@@ -637,44 +577,34 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
     }
 
     /** Corner radius for a tile of this width: 16dp at the design width, proportionally less when smaller. */
-    static float cornerRadius(int tileWidthPx, float density) {
+    static float cornerRadius(int tileWidthPx, int tileHeightPx, float density) {
+        if (tileWidthPx == tileHeightPx) return 0.225f * tileWidthPx;   // dock square: app-icon corners
         return 16f * density * Math.min(1f, tileWidthPx / (DESIGN_W_DP * density));
     }
 
     static final class Holder extends RecyclerView.ViewHolder {
         final View card;
-        /** item_app.xml's tile_bg: the dark card behind an icon tile, or behind a banner that has transparent parts. */
-        final Drawable cardBackground;
         final ImageView banner;
         final ImageView icon;
         final TextView label;
         final TextView name;
-        final boolean animations;
-        final boolean advancedEffects;
         final boolean reducedMotion;
-        /** Alpha of the name while the tile is not focused (always_show_names). */
-        final float restNameAlpha;
 
-        Holder(View v, TileListener listener, boolean animations, boolean advancedEffects,
-               boolean reducedMotion, float restNameAlpha) {
+        Holder(View v, TileListener listener, boolean reducedMotion) {
             super(v);
             card = v.findViewById(R.id.card);
-            cardBackground = card.getBackground();
             banner = v.findViewById(R.id.banner);
             icon = v.findViewById(R.id.icon);
             label = v.findViewById(R.id.label);
             name = v.findViewById(R.id.name);
-            this.animations = animations;
-            this.advancedEffects = advancedEffects;
             this.reducedMotion = reducedMotion;
-            this.restNameAlpha = restNameAlpha;
 
             final float density = v.getResources().getDisplayMetrics().density;
             card.setOutlineProvider(new ViewOutlineProvider() {
                 @Override
                 public void getOutline(View view, Outline outline) {
                     // 16dp at the design width, scaled down with the tile so small tiles keep the same shape.
-                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), cornerRadius(view.getWidth(), density));
+                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), cornerRadius(view.getWidth(), view.getHeight(), density));
                 }
             });
             card.setClipToOutline(true);
@@ -688,44 +618,24 @@ public class AppAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
             });
 
             card.setOnFocusChangeListener((view, focused) -> {
+                float s = focused ? FOCUS_SCALE : 1.0f;
                 view.animate().cancel();
-                banner.animate().cancel();
                 name.animate().cancel();
-                float scale = !animations ? 1f : advancedEffects ? 1.12f : 1.10f;
-                float s = focused ? scale : 1f;
-                if (!animations) {
-                    view.setScaleX(1f);
-                    view.setScaleY(1f);
-                    view.setTranslationY(0f);
-                    view.setTranslationZ(0f);
-                    banner.setScaleX(1f);
-                    banner.setScaleY(1f);
-                    name.setAlpha(focused ? 1f : restNameAlpha);
-                    name.setTranslationY(0f);
-                } else if (reducedMotion) {
+                if (reducedMotion) {
+                    // No overshoot: the extra frames redraw the banner and the dock band on a weak GPU.
                     view.animate().scaleX(s).scaleY(s)
-                            .translationY(focused && advancedEffects ? -4f * density : 0f)
-                            .translationZ(focused && advancedEffects ? 8f * density : 0f)
                             .setDuration(focused ? 120 : 80)
                             .setInterpolator(new DecelerateInterpolator())
-                            .withLayer().start();
-                    name.animate().alpha(focused ? 1f : restNameAlpha).setDuration(100).start();
-                    // Same place as the full motion's slide ends: the layout's -6dp is only its starting point, and
-                    // left there the name overlaps the zoomed tile.
-                    // Only on focus: snapping it back to -6dp while it fades out would jump it up over the tile.
-                    if (focused) name.setTranslationY(density * 4f);
+                            .withLayer()
+                            .start();
+                    name.animate().alpha(focused ? 1f : 0f).setDuration(100).start();
                 } else {
                     view.animate().scaleX(s).scaleY(s)
-                            .translationY(focused && advancedEffects ? -4f * density : 0f)
-                            .translationZ(focused && advancedEffects ? 8f * density : 0f)
-                            .setDuration(advancedEffects ? (focused ? 220 : 170) : (focused ? 260 : 180))
-                            .setInterpolator(new OvershootInterpolator(focused ? (advancedEffects ? 0.7f : 1.6f) : 0f))
-                            .withLayer().start();
-                    if (advancedEffects) {
-                        banner.animate().scaleX(focused ? 1.035f : 1f).scaleY(focused ? 1.035f : 1f)
-                                .setDuration(280).start();
-                    }
-                    name.animate().alpha(focused ? 1f : restNameAlpha)
+                            .setDuration(focused ? 260 : 180)
+                            .setInterpolator(new OvershootInterpolator(focused ? 1.6f : 0f))
+                            .withLayer()
+                            .start();
+                    name.animate().alpha(focused ? 1f : 0f)
                             .translationY(focused ? density * 4f : -density * 6f)
                             .setDuration(220).start();
                 }
