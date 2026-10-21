@@ -1,0 +1,19 @@
+{
+  "name": "glassos-tv",
+  "owner": {
+    "name": "jmarknavarro",
+    "url": "https://github.com/jmarknavarro"
+  },
+  "metadata": {
+    "description": "Claude Code plugin for glassOS-tv, the Liquid Glass home screen for Android TV."
+  },
+  "plugins": [
+    {
+      "name": "glassos-tv",
+      "source": "./claude-plugin",
+      "description": "Install the glassOS-tv launcher on an Android TV, debloat it safely, push wallpapers and themes, and check the result with screenshots from the TV.",
+      "category": "productivity",
+      "keywords": ["android-tv", "google-tv", "launcher", "adb", "debloat"]
+    }
+  ]
+}

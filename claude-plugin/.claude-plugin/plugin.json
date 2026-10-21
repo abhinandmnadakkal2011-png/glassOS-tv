@@ -1,0 +1,13 @@
+{
+  "name": "glassos-tv",
+  "version": "1.0.0",
+  "description": "Install the glassOS-tv launcher on an Android TV, debloat it safely, push wallpapers and themes, and check the result with screenshots from the TV.",
+  "author": {
+    "name": "jmarknavarro",
+    "url": "https://github.com/jmarknavarro"
+  },
+  "homepage": "https://github.com/jmarknavarro/glassOS-tv",
+  "repository": "https://github.com/jmarknavarro/glassOS-tv",
+  "license": "MIT",
+  "keywords": ["android-tv", "google-tv", "launcher", "adb", "debloat"]
+}

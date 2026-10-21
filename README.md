@@ -39,6 +39,20 @@
   <img src="docs/glassos/icon-styles.png" alt="The same dock icons in the Original, Dark, Clear and Tinted styles" width="820">
 </p>
 
+## Install with Claude Code
+
+This repo is also a Claude Code plugin. In Claude Code, on a computer on the same Wi-Fi as the TV:
+
+```
+/plugin marketplace add jmarknavarro/glassOS-tv
+/plugin install glassos-tv@glassos-tv
+```
+
+Then run `/glassos-tv:install 192.168.1.50` (your TV's IP). It clones this repo to `~/glassOS-tv` if
+needed, checks the build tools, builds and installs the launcher, and checks the result with screenshots
+from the TV. The plugin also has `/glassos-tv:debloat`, `/glassos-tv:wallpapers` and `/glassos-tv:check`.
+Do step 1 below on the TV first.
+
 ## Install
 
 You need a computer on the same Wi-Fi as the TV, with Python 3, JDK 17 and the Android SDK
