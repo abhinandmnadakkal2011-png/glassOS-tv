@@ -1,51 +1,39 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- An Inputs dropdown row, macOS menu style: the icon in a round badge (blue when connected), then the name. -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
-    android:layout_height="42dp"
+    android:layout_height="46dp"
     android:orientation="horizontal"
     android:gravity="center_vertical"
-    android:paddingStart="12dp"
-    android:paddingEnd="12dp"
+    android:paddingStart="7dp"
+    android:paddingEnd="16dp"
     android:background="@drawable/input_row_bg"
     android:focusable="true"
     android:clickable="true">
 
-    <ImageView
-        android:id="@+id/icon"
-        android:layout_width="20dp"
-        android:layout_height="20dp"
-        android:tint="@drawable/pill_text"
-        android:duplicateParentState="true"
-        android:contentDescription="@null" />
+    <FrameLayout
+        android:id="@+id/iconBg"
+        android:layout_width="32dp"
+        android:layout_height="32dp">
+
+        <ImageView
+            android:id="@+id/icon"
+            android:layout_width="17dp"
+            android:layout_height="17dp"
+            android:layout_gravity="center"
+            android:tint="#FFFFFFFF"
+            android:contentDescription="@null" />
+    </FrameLayout>
 
     <TextView
         android:id="@+id/title"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:layout_weight="1"
-        android:layout_marginStart="10dp"
-        android:layout_marginEnd="12dp"
-        android:textColor="@drawable/pill_text"
-        android:duplicateParentState="true"
+        android:layout_marginStart="12dp"
+        android:textColor="#FFFFFFFF"
         android:textSize="15sp"
         android:fontFamily="@font/outfit"
         android:fontVariationSettings="'wght' 500"
         android:singleLine="true" />
-
-    <View
-        android:id="@+id/dot"
-        android:layout_width="7dp"
-        android:layout_height="7dp"
-        android:layout_marginEnd="8dp"
-        android:background="@drawable/status_dot" />
-
-    <TextView
-        android:id="@+id/status"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:textColor="@drawable/pill_text_dim"
-        android:duplicateParentState="true"
-        android:textSize="11sp"
-        android:fontFamily="@font/outfit"
-        android:letterSpacing="0.04" />
 </LinearLayout>

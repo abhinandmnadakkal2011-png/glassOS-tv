@@ -56,6 +56,11 @@ public class LauncherSettingsActivity extends Activity {
     private Set<String> hidden;
     /** The row being moved, or null. */
     private View moving;
+    /** Section headers and their rows; openSection is the index of the expanded one, or -1. */
+    private final List<View> headers = new ArrayList<>();
+    private final List<View> bodies = new ArrayList<>();
+    private final List<TextView> chevrons = new ArrayList<>();
+    private int openSection = -1;
 
     @Override
     protected void onCreate(Bundle state) {
@@ -97,42 +102,52 @@ public class LauncherSettingsActivity extends Activity {
         hint.setPadding(0, dp(6), 0, dp(10));
         col.addView(hint);
 
-        col.addView(section(R.string.ls_dock));
-        col.addView(stepper(R.string.ls_icon_size, LauncherPrefs.ICON, LauncherPrefs.DEF_ICON_DP, 32, 104, 4, "dp"));
-        col.addView(stepper(R.string.ls_spacing, LauncherPrefs.GAP, LauncherPrefs.DEF_GAP_DP, 6, 40, 2, "dp"));
-        col.addView(stepper(R.string.ls_visible, LauncherPrefs.VISIBLE, LauncherPrefs.DEF_VISIBLE, 4, 10, 1, ""));
-        col.addView(chooser(R.string.ls_icon_theme, LauncherPrefs.ICON_THEME, LauncherPrefs.DEF_ICON_THEME, IconThemes.NAMES));
-        col.addView(chooser(R.string.ls_icon_tint, LauncherPrefs.ICON_TINT, LauncherPrefs.DEF_ICON_TINT, IconThemes.TINT_NAMES));
-        col.addView(toggle(R.string.ls_icon_glass, LauncherPrefs.ICON_GLASS));
-        col.addView(stepper(R.string.ls_glass_edge, LauncherPrefs.GLASS_EDGE, LauncherPrefs.DEF_GLASS_EDGE, 1, 10, 1, ""));
-        col.addView(stepper(R.string.ls_glass_bright, LauncherPrefs.GLASS_BRIGHT, LauncherPrefs.DEF_GLASS_BRIGHT, 0, 200, 10, "%"));
-        col.addView(stepper(R.string.ls_shade, LauncherPrefs.SHADE, LauncherPrefs.DEF_SHADE, 0, 100, 10, "%"));
-        col.addView(stepper(R.string.ls_shade_height, LauncherPrefs.SHADE_HEIGHT, LauncherPrefs.DEF_SHADE_HEIGHT, 80, 540, 20, "dp"));
-        col.addView(stepper(R.string.ls_bottom, LauncherPrefs.BOTTOM, LauncherPrefs.DEF_BOTTOM_DP, 0, 200, 4, "dp"));
-
-        col.addView(section(R.string.ls_wallpaper_section));
-        col.addView(wallpaperChooser());
-        col.addView(stepper(R.string.ls_wall_dim, LauncherPrefs.WALL_DIM, LauncherPrefs.DEF_WALL_DIM, 0, 80, 5, "%"));
-        col.addView(toggle(R.string.ls_glow, LauncherPrefs.GLOW));
-
-        col.addView(section(R.string.ls_clock));
-        col.addView(toggle(R.string.ls_show_clock, LauncherPrefs.SHOW_CLOCK));
-        col.addView(toggle(R.string.ls_show_date, LauncherPrefs.SHOW_DATE));
-        col.addView(stepper(R.string.ls_clock_size, LauncherPrefs.CLOCK, LauncherPrefs.DEF_CLOCK_SP, 48, 140, 4, ""));
-        col.addView(stepper(R.string.ls_clock_weight, LauncherPrefs.CLOCK_WEIGHT, LauncherPrefs.DEF_CLOCK_WEIGHT, 100, 900, 50, ""));
-        col.addView(stepper(R.string.ls_clock_shadow, LauncherPrefs.CLOCK_SHADOW, LauncherPrefs.DEF_CLOCK_SHADOW, 0, 100, 10, "%"));
-        col.addView(stepper(R.string.ls_date_size, LauncherPrefs.DATE, LauncherPrefs.DEF_DATE_SP, 12, 40, 1, ""));
-        col.addView(stepper(R.string.ls_clock_top, LauncherPrefs.CLOCK_TOP, LauncherPrefs.DEF_CLOCK_TOP_DP, 0, 320, 4, "dp"));
-
-        col.addView(section(R.string.ls_apps));
+        // Collapsible sections, one open at a time so the panel stays short.
+        headers.clear();
+        bodies.clear();
+        LinearLayout appsBody = group(col, R.string.ls_apps);
         TextView appsHint = text(getString(R.string.ls_apps_hint), 12, 0x80FFFFFF, 400);
         appsHint.setPadding(dp(4), 0, 0, dp(8));
-        col.addView(appsHint);
+        appsBody.addView(appsHint);
         appRows = new LinearLayout(this);
         appRows.setOrientation(LinearLayout.VERTICAL);
-        col.addView(appRows);
+        appsBody.addView(appRows);
         loadApps();
         for (App a : apps) appRows.addView(appRow(a));
+
+        LinearLayout wall = group(col, R.string.ls_wallpaper_section);
+        wall.addView(wallpaperChooser());
+        wall.addView(stepper(R.string.ls_wall_dim, LauncherPrefs.WALL_DIM, LauncherPrefs.DEF_WALL_DIM, 0, 80, 5, "%"));
+        wall.addView(toggle(R.string.ls_glow, LauncherPrefs.GLOW, LauncherPrefs.DEF_GLOW));
+
+        LinearLayout clock = group(col, R.string.ls_clock);
+        clock.addView(toggle(R.string.ls_show_clock, LauncherPrefs.SHOW_CLOCK));
+        clock.addView(toggle(R.string.ls_show_date, LauncherPrefs.SHOW_DATE));
+        clock.addView(stepper(R.string.ls_clock_size, LauncherPrefs.CLOCK, LauncherPrefs.DEF_CLOCK_SP, 48, 140, 4, ""));
+        clock.addView(stepper(R.string.ls_clock_weight, LauncherPrefs.CLOCK_WEIGHT, LauncherPrefs.DEF_CLOCK_WEIGHT, 100, 900, 50, ""));
+        clock.addView(stepper(R.string.ls_clock_shadow, LauncherPrefs.CLOCK_SHADOW, LauncherPrefs.DEF_CLOCK_SHADOW, 0, 100, 10, "%"));
+        clock.addView(stepper(R.string.ls_date_size, LauncherPrefs.DATE, LauncherPrefs.DEF_DATE_SP, 12, 40, 1, ""));
+        clock.addView(stepper(R.string.ls_clock_top, LauncherPrefs.CLOCK_TOP, LauncherPrefs.DEF_CLOCK_TOP_DP, 0, 320, 4, "dp"));
+
+        LinearLayout dock = group(col, R.string.ls_dock);
+        dock.addView(stepper(R.string.ls_icon_size, LauncherPrefs.ICON, LauncherPrefs.DEF_ICON_DP, 32, 104, 4, "dp"));
+        dock.addView(stepper(R.string.ls_spacing, LauncherPrefs.GAP, LauncherPrefs.DEF_GAP_DP, 6, 40, 2, "dp"));
+        dock.addView(stepper(R.string.ls_visible, LauncherPrefs.VISIBLE, LauncherPrefs.DEF_VISIBLE, 4, 10, 1, ""));
+        dock.addView(chooser(R.string.ls_icon_theme, LauncherPrefs.ICON_THEME, LauncherPrefs.DEF_ICON_THEME, IconThemes.NAMES));
+        dock.addView(chooser(R.string.ls_icon_tint, LauncherPrefs.ICON_TINT, LauncherPrefs.DEF_ICON_TINT, IconThemes.TINT_NAMES));
+        dock.addView(toggle(R.string.ls_icon_glass, LauncherPrefs.ICON_GLASS));
+        dock.addView(stepper(R.string.ls_glass_edge, LauncherPrefs.GLASS_EDGE, LauncherPrefs.DEF_GLASS_EDGE, 1, 10, 1, ""));
+        dock.addView(stepper(R.string.ls_glass_bright, LauncherPrefs.GLASS_BRIGHT, LauncherPrefs.DEF_GLASS_BRIGHT, 0, 200, 10, "%"));
+        dock.addView(stepper(R.string.ls_shade, LauncherPrefs.SHADE, LauncherPrefs.DEF_SHADE, 0, 100, 10, "%"));
+        dock.addView(stepper(R.string.ls_shade_height, LauncherPrefs.SHADE_HEIGHT, LauncherPrefs.DEF_SHADE_HEIGHT, 80, 540, 20, "dp"));
+        dock.addView(stepper(R.string.ls_bottom, LauncherPrefs.BOTTOM, LauncherPrefs.DEF_BOTTOM_DP, 0, 200, 4, "dp"));
+        dock.addView(toggle(R.string.ls_pill_labels, LauncherPrefs.PILL_LABELS, false));
+
+        LinearLayout glass = group(col, R.string.ls_glass);
+        glass.addView(stepper(R.string.ls_ui_rim, LauncherPrefs.UI_RIM, LauncherPrefs.DEF_UI_RIM, 0, 150, 10, "%"));
+        glass.addView(stepper(R.string.ls_ui_rim_width, LauncherPrefs.UI_RIM_WIDTH, LauncherPrefs.DEF_UI_RIM_WIDTH, 1, 6, 1, ""));
+        glass.addView(stepper(R.string.ls_ui_tint, LauncherPrefs.UI_TINT, LauncherPrefs.DEF_UI_TINT, 0, 100, 5, "%"));
+        showOpen();
 
         col.addView(section(R.string.ls_other));
         View reset = row(text(getString(R.string.ls_reset), 15, 0xFFFF6961, 500), null);
@@ -144,7 +159,8 @@ public class LauncherSettingsActivity extends Activity {
         col.addView(reset);
 
         setContentView(root);
-        col.getChildAt(3).requestFocus();
+        int focus = Math.max(0, openSection < 0 ? 0 : openSection);
+        headers.get(focus).requestFocus();
     }
 
     // ---- rows ------------------------------------------------------------------------------------
@@ -247,12 +263,16 @@ public class LauncherSettingsActivity extends Activity {
     }
 
     private View toggle(int labelRes, String key) {
+        return toggle(labelRes, key, true);
+    }
+
+    private View toggle(int labelRes, String key, boolean def) {
         TextView value = text("", 15, 0xFFFFFFFF, 500);
         View row = row(text(getString(labelRes), 15, 0xE6FFFFFF, 400), value);
-        Runnable show = () -> value.setText(prefs.getBool(key) ? R.string.ls_on : R.string.ls_off);
+        Runnable show = () -> value.setText(prefs.getBool(key, def) ? R.string.ls_on : R.string.ls_off);
         show.run();
         row.setOnClickListener(r -> {
-            prefs.putBool(key, !prefs.getBool(key));
+            prefs.putBool(key, !prefs.getBool(key, def));
             show.run();
         });
         return row;
@@ -357,6 +377,40 @@ public class LauncherSettingsActivity extends Activity {
         lp.bottomMargin = dp(4);
         row.setLayoutParams(lp);
         return row;
+    }
+
+    /** A section header row (OK opens or closes it) followed by its rows; returns the rows' container. */
+    private LinearLayout group(LinearLayout col, int titleRes) {
+        int index = headers.size();
+        TextView title = text(getString(titleRes).toUpperCase(), 12, 0xCCFFFFFF, 600);
+        title.setLetterSpacing(0.18f);
+        TextView chevron = text("\u203A", 18, 0xB3FFFFFF, 500);
+        chevron.setGravity(Gravity.CENTER);
+        View header = row(title, chevron);
+        ((LinearLayout.LayoutParams) header.getLayoutParams()).topMargin = dp(index == 0 ? 6 : 2);
+        header.setOnClickListener(v -> {
+            if (moving != null) return;
+            openSection = openSection == index ? -1 : index;
+            showOpen();
+        });
+        col.addView(header);
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setPadding(dp(8), dp(2), 0, dp(8));
+        col.addView(body);
+        headers.add(header);
+        bodies.add(body);
+        chevrons.add(chevron);
+        return body;
+    }
+
+    /** Shows only the open section's rows; its chevron points down. */
+    private void showOpen() {
+        for (int i = 0; i < bodies.size(); i++) {
+            boolean open = i == openSection;
+            bodies.get(i).setVisibility(open ? View.VISIBLE : View.GONE);
+            chevrons.get(i).setRotation(open ? 90 : 0);
+        }
     }
 
     private TextView section(int res) {

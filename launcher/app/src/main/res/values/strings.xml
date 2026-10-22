@@ -48,8 +48,12 @@
     <string name="card_state_new_label">New name</string>
     <!-- Launcher settings (hold OK on the Settings icon in the dock) -->
     <string name="ls_title">Home settings</string>
-    <string name="ls_hint">Left and Right change a value, OK switches. Home updates behind this panel as you go.</string>
+    <string name="ls_hint">OK opens a section. Left and Right change a value, OK switches. Home updates behind this panel as you go.</string>
     <string name="ls_dock">Dock</string>
+    <string name="ls_glass">Liquid glass</string>
+    <string name="ls_ui_rim">Rim brightness</string>
+    <string name="ls_ui_rim_width">Rim thickness</string>
+    <string name="ls_ui_tint">Glass darkness</string>
     <string name="ls_icon_size">Icon size</string>
     <string name="ls_spacing">Space between icons</string>
     <string name="ls_visible">Icons shown before scrolling</string>
@@ -69,6 +73,7 @@
     <string name="ls_wall_custom">Your picture</string>
     <string name="ls_wall_dim">Wallpaper dimming</string>
     <string name="ls_glow">App colour glow</string>
+    <string name="ls_pill_labels">Labels on Inputs, Wi-Fi and Control Center</string>
     <string name="ls_show_clock">Show clock</string>
     <string name="ls_show_date">Show date</string>
     <string name="ls_clock_size">Clock size</string>
@@ -85,4 +90,12 @@
     <string name="ls_off">Off</string>
     <string name="ls_other">Other</string>
     <string name="ls_reset">Reset all to defaults</string>
+    <string name="control_center">Control Center</string>
+    <string name="cc_bluetooth">Bluetooth</string>
+    <string name="cc_audio_output">Audio output</string>
+    <string name="cc_tv_speakers">TV speakers</string>
+    <string name="cc_accessibility">Accessibility</string>
+    <string name="cc_screensaver">Screensaver</string>
+    <string name="cc_screensaver_hint">Start now</string>
+    <string name="cc_all_settings">All settings</string>
 </resources>

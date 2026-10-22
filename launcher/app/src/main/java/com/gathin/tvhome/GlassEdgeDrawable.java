@@ -28,8 +28,26 @@ class GlassEdgeDrawable extends Drawable {
     private final Paint inner = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint sheen = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
+    /** Fully rounded ends (Control Center's pill tiles and round buttons) instead of an icon's corners. */
+    private final boolean capsule;
+    /** A fixed corner radius in px (the Inputs panel), or 0 for capsule / icon corners. */
+    private final float cornerPx;
 
     GlassEdgeDrawable(float density, int thicknessSteps, int brightnessPercent) {
+        this(density, thicknessSteps, brightnessPercent, false, 0);
+    }
+
+    GlassEdgeDrawable(float density, int thicknessSteps, int brightnessPercent, boolean capsule) {
+        this(density, thicknessSteps, brightnessPercent, capsule, 0);
+    }
+
+    GlassEdgeDrawable(float density, int thicknessSteps, int brightnessPercent, float cornerPx) {
+        this(density, thicknessSteps, brightnessPercent, false, cornerPx);
+    }
+
+    private GlassEdgeDrawable(float density, int thicknessSteps, int brightnessPercent, boolean capsule, float cornerPx) {
+        this.capsule = capsule;
+        this.cornerPx = cornerPx;
         this.density = density;
         this.bright = Math.max(0, brightnessPercent) / 100f;
         this.rimWidth = Math.max(1f, thicknessSteps * 0.5f * density);
@@ -59,7 +77,8 @@ class GlassEdgeDrawable extends Drawable {
     @Override
     public void draw(@NonNull Canvas c) {
         Rect b = getBounds();
-        float radius = 0.225f * b.width();
+        float radius = cornerPx > 0 ? cornerPx
+                : capsule ? Math.min(b.width(), b.height()) / 2f : 0.225f * b.width();
         rect.set(b);
         c.drawRoundRect(rect, radius, radius, sheen);
         float half = rim.getStrokeWidth() / 2f;

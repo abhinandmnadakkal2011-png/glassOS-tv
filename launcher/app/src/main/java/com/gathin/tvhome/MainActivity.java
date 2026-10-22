@@ -29,18 +29,19 @@ import android.net.NetworkRequest;
 import android.net.Uri;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.Settings;
+import android.transition.ChangeBounds;
+import android.transition.TransitionManager;
 import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.TextPaint;
 import android.text.TextUtils;
-import android.transition.ChangeBounds;
-import android.transition.TransitionManager;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
@@ -99,6 +100,12 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
     private View btnInputs;
     private TextView btnWifi;
     private ViewGroup topButtons;
+    /** Home settings: show the Inputs, Wi-Fi and Settings labels on the focused pill (off: icons only). */
+    private boolean pillLabels;
+    /** The network as the Wi-Fi pill last showed it, for the Control Center's Wi-Fi tile. */
+    private String netStatus = "";
+    private int netIcon = R.drawable.ic_wifi;
+    private boolean netOnline;
     private TextView shamsiDate;
     private boolean shamsi;
     private String vpnApp;
@@ -259,7 +266,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         glass = findViewById(R.id.glass);
         ambient = findViewById(R.id.ambient);
         // The focused app's colour glow (Home settings: App colour glow).
-        if (!prefs.getBool(LauncherPrefs.GLOW)) ambient.setVisibility(View.GONE);
+        if (!prefs.getBool(LauncherPrefs.GLOW, LauncherPrefs.DEF_GLOW)) ambient.setVisibility(View.GONE);
+        pillLabels = prefs.getBool(LauncherPrefs.PILL_LABELS, false);
         heroName = findViewById(R.id.heroName);
         greeting = findViewById(R.id.greeting);
         btnWifi = findViewById(R.id.btnWifi);
@@ -292,7 +300,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         grid.setClipToPadding(true);  // and scrolling keeps the end icons inside the side padding
         grid.setHasFixedSize(true);
         grid.setItemAnimator(null);
-        grid.addItemDecoration(new DockDecoration(COLUMNS, density));
+        grid.addItemDecoration(new DockDecoration(COLUMNS, density, LauncherPrefs.get(this)));
         int enterAnim = reducedMotion ? R.anim.tile_enter_reduced : R.anim.tile_enter;
         float enterDelay = reducedMotion ? 0f : 0.06f;
         grid.setLayoutAnimation(new LayoutAnimationController(
@@ -394,7 +402,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             open(systemIntent(Settings.ACTION_WIFI_SETTINGS));
             return true;
         });
-        btnSettings.setOnClickListener(v -> open(systemIntent(Settings.ACTION_SETTINGS)));
+        btnSettings.setOnClickListener(v -> showControlCenter());
         btnSettings.setOnLongClickListener(v -> {
             if (!moduleCards) return false;   // off: a long press does nothing, as before the feature
             showModuleCards();
@@ -422,7 +430,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         btnWifi.setOnKeyListener(pillKeys);
         btnSettings.setOnKeyListener(pillKeys);
 
-        // Pills show only their icon until focused, then grow to show the label.
+        // Pills show only their icon; with labels on (Home settings) the focused one grows to show its label.
         topButtons = findViewById(R.id.topButtons);
         View.OnFocusChangeListener pillFocus = (v, hasFocus) -> {
             TransitionManager.beginDelayedTransition(topButtons, new ChangeBounds().setDuration(160));
@@ -431,7 +439,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         for (TextView pill : new TextView[]{(TextView) btnInputs, btnWifi, (TextView) btnSettings}) {
             if (pill.getTag() == null) pill.setTag(pill.getText());
             applyPillLabel(pill);
-            pill.setOnFocusChangeListener(pillFocus);
+            if (pillLabels) pill.setOnFocusChangeListener(pillFocus);
         }
 
         // Hide the glass when focus leaves the tiles.
@@ -970,7 +978,7 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
             return position % COLUMNS == COLUMNS - 1 || position == count - 1;
         }
         if (keyCode == KeyEvent.KEYCODE_DPAD_UP) {
-            if (position < COLUMNS) return true;           // dock row: stay; holding Up opens the pills
+            if (position < COLUMNS) return true;           // dock row: stay; holding or double-pressing Up opens the pills
             target = position - COLUMNS;
         } else {
             int lastRowStart = ((count - 1) / COLUMNS) * COLUMNS;
@@ -981,17 +989,34 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         return true;
     }
 
-    /** Holding Up on the dock (a repeat of the key) reveals the top-bar pills and focuses the nearest one. */
+    /** Two Up presses closer together than this count as a double press. */
+    private static final long DOUBLE_UP_MS = 400;
+    /** When Up was last pressed (not held), for the double press; 0 once another key comes between. */
+    private long lastUpPress;
+
+    /**
+     * Holding Up on the dock (a repeat of the key), or pressing it twice quickly, reveals the top-bar pills
+     * and focuses the nearest one.
+     */
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
         int code = event.getKeyCode();
+        boolean doubleUp = false;
+        if (event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() == 0) {
+            if (code == KeyEvent.KEYCODE_DPAD_UP) {
+                doubleUp = lastUpPress != 0 && event.getEventTime() - lastUpPress < DOUBLE_UP_MS;
+                lastUpPress = doubleUp ? 0 : event.getEventTime();
+            } else {
+                lastUpPress = 0;
+            }
+        }
         if (code == KeyEvent.KEYCODE_DPAD_LEFT || code == KeyEvent.KEYCODE_DPAD_RIGHT) {
             // A held Left/Right repeats every ~50 ms, faster than a smooth scroll: focus would run ahead onto
             // icons still outside the dock (laid out for the scroll, but clipped), with the glow following.
             holdingDpad = event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() > 0;
         }
         if (event.getKeyCode() == KeyEvent.KEYCODE_DPAD_UP && event.getAction() == KeyEvent.ACTION_DOWN
-                && event.getRepeatCount() > 0 && topButtons.getVisibility() != View.VISIBLE) {
+                && (event.getRepeatCount() > 0 || doubleUp) && topButtons.getVisibility() != View.VISIBLE) {
             View f = getCurrentFocus();
             if (f != null && f.getId() == R.id.card) {
                 RecyclerView.ViewHolder vh = grid.findContainingViewHolder(f);
@@ -1125,6 +1150,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         } catch (Exception ignored) {
         }
         // With a VPN app configured, a VPN that is down matters too: show a red "VPN off" capsule then.
+        netStatus = text;
+        netIcon = icon;
+        netOnline = online;
         boolean vpnDown = !vpn && online && !vpnApp.isEmpty();
         if (vpn || vpnDown) {
             // Network name, then the green lock-and-VPN (or red "VPN off") capsule drawn in place of the word.
@@ -1148,10 +1176,13 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         applyPillLabel(btnWifi);
     }
 
-    /** Shows a top-bar pill's label (kept in its tag) only while it has focus; unfocused it is a 42dp icon circle. */
+    /**
+     * Shows a top-bar pill's label (kept in its tag) only while it has focus and labels are on in Home
+     * settings; otherwise it is a 42dp icon circle and the label is only read out by accessibility.
+     */
     private void applyPillLabel(TextView pill) {
         CharSequence label = (CharSequence) pill.getTag();
-        boolean open = pill.isFocused();
+        boolean open = pillLabels && pill.isFocused();
         pill.setText(open ? label : "");
         pill.setContentDescription(label);
         pill.setCompoundDrawablePadding(open ? Math.round(9 * density) : 0);
@@ -1220,7 +1251,9 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
             startActivity(i);
-        } catch (ActivityNotFoundException e) {
+        } catch (ActivityNotFoundException | SecurityException e) {
+            // SecurityException: the target needs a permission we lack (Google TV's accessory pairing wants
+            // BLUETOOTH_CONNECT). Uncaught it would crash Home, and Android then drops the home preference.
             Toast.makeText(this, R.string.not_available, Toast.LENGTH_SHORT).show();
         }
     }
@@ -1250,8 +1283,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         View panel = getLayoutInflater().inflate(R.layout.popup_inputs, root, false);
         LinearLayout rows = panel.findViewById(R.id.rows);
 
-        // Compact: as wide as the Inputs pill (a touch wider so "HDMI 1" fits), hanging right below it.
-        int width = Math.max(anchor.getWidth(), (int) (150 * density));
+        // Liquid glass, like the Control Center tiles: smoky see-through fill under a bright rim.
+        GradientDrawable glassBg = new GradientDrawable();
+        LauncherPrefs glassPrefs = LauncherPrefs.get(this);
+        glassBg.setColor(glassPrefs.uiGlassFill());
+        glassBg.setCornerRadius(26 * density);
+        panel.setBackground(glassBg);
+        panel.setForeground(glassPrefs.uiRim(density, false, 26 * density));
+        // Compact, hanging right below the Inputs pill; wide enough for "HDMI 1" beside its badge.
+        int width = Math.max(anchor.getWidth(), (int) (200 * density));
         final PopupWindow popup = glassPopup(panel, width);
 
         TvInputManager tim = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
@@ -1323,7 +1363,8 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         panel.measure(View.MeasureSpec.UNSPECIFIED, View.MeasureSpec.UNSPECIFIED);
         popup.setWidth(Math.max(width, panel.getMeasuredWidth()));
 
-        dropIn(popup, panel, anchor, Gravity.START);
+        // Right-aligned with the pill row, like the Control Center: wider than the Inputs pill, it would run off screen.
+        dropIn(popup, panel, topButtons, Gravity.END);
         rows.getChildAt(0).requestFocus();
     }
 
@@ -1364,20 +1405,15 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         View row = getLayoutInflater().inflate(R.layout.item_input, rows, false);
         ((ImageView) row.findViewById(R.id.icon)).setImageResource(iconRes);
         ((TextView) row.findViewById(R.id.title)).setText(title);
-        TextView status = row.findViewById(R.id.status);
-        View dot = row.findViewById(R.id.dot);
-        // This TV reports "standby" for every port whether or not something is plugged in, so only
-        // definite states are shown.
-        if (state == TvInputManager.INPUT_STATE_CONNECTED) {
-            status.setText(R.string.connected);
-            dot.setVisibility(View.VISIBLE);
-        } else if (state == TvInputManager.INPUT_STATE_DISCONNECTED) {
-            status.setText(R.string.not_connected);
-            dot.setVisibility(View.GONE);
-        } else {
-            status.setVisibility(View.GONE);
-            dot.setVisibility(View.GONE);
-        }
+        // The badge is blue for a connected input, grey otherwise, like a joined network in the macOS menu.
+        // This TV reports "standby" for every port whether or not something is plugged in, so only a
+        // definite "connected" turns it blue.
+        boolean connected = state == TvInputManager.INPUT_STATE_CONNECTED;
+        GradientDrawable badge = new GradientDrawable();
+        badge.setShape(GradientDrawable.OVAL);
+        badge.setColor(connected ? ControlCenter.ACCENT : 0x38FFFFFF);
+        row.findViewById(R.id.iconBg).setBackground(badge);
+        if (connected) row.setContentDescription(title + ", " + getString(R.string.connected));
         row.setOnClickListener(v -> {
             popup.dismiss();
             action.run();
@@ -1519,6 +1555,124 @@ public class MainActivity extends Activity implements AppAdapter.TileListener {
         popup.setHeight(Math.min(panel.getMeasuredHeight(), Math.max(room, (int) (120 * density))));
         dropIn(popup, panel, anchor, Gravity.END);
         rows.getChildAt(0).requestFocus();
+    }
+
+    // ---- control center --------------------------------------------------------------------------
+
+    /**
+     * The Settings pill's panel: Wi-Fi, Bluetooth, audio output, accessibility and the screensaver, plus
+     * All settings for the TV's own settings app. Each tile opens the matching settings screen.
+     */
+    private void showControlCenter() {
+        View anchor = findViewById(R.id.btnSettings);
+        final PopupWindow[] popup = new PopupWindow[1];
+        // Every action closes the panel first, so coming back to Home finds it gone.
+        java.util.function.Function<Runnable, Runnable> closing = r -> () -> {
+            if (popup[0] != null) popup[0].dismiss();
+            r.run();
+        };
+        updateWifiLabel();
+
+        String bt;
+        boolean btOn = false;
+        try {
+            android.bluetooth.BluetoothManager bm = getSystemService(android.bluetooth.BluetoothManager.class);
+            android.bluetooth.BluetoothAdapter ad = bm != null ? bm.getAdapter() : null;
+            btOn = ad != null && ad.isEnabled();
+            bt = getString(ad == null ? R.string.not_available : btOn ? R.string.ls_on : R.string.ls_off);
+        } catch (SecurityException e) {
+            bt = null;
+        }
+
+        String audio = null;
+        try {
+            android.media.MediaRouter mr = (android.media.MediaRouter) getSystemService(MEDIA_ROUTER_SERVICE);
+            CharSequence name = mr.getSelectedRoute(android.media.MediaRouter.ROUTE_TYPE_LIVE_AUDIO).getName(this);
+            if (name != null && name.length() > 0) audio = name.toString();
+        } catch (Exception ignored) {
+        }
+        if (audio == null) audio = getString(R.string.cc_tv_speakers);
+
+        ControlCenter.Tile[][] rows = {
+                {new ControlCenter.Tile(netIcon, getString(R.string.wifi), netStatus, netOnline,
+                        closing.apply(this::openNetworkPill),
+                        closing.apply(() -> open(systemIntent(Settings.ACTION_WIFI_SETTINGS)))),
+                 new ControlCenter.Tile(R.drawable.ic_bluetooth, getString(R.string.cc_bluetooth), bt, btOn,
+                        closing.apply(this::openBluetooth), null)},
+                {new ControlCenter.Tile(R.drawable.ic_speaker, getString(R.string.cc_audio_output), audio, false,
+                        closing.apply(() -> open(systemIntent(Settings.ACTION_SOUND_SETTINGS))), null),
+                 new ControlCenter.Tile(R.drawable.ic_accessibility, getString(R.string.cc_accessibility), null, false,
+                        closing.apply(() -> open(systemIntent(Settings.ACTION_ACCESSIBILITY_SETTINGS))), null)},
+                {new ControlCenter.Tile(R.drawable.ic_screensaver, getString(R.string.cc_screensaver),
+                        getString(R.string.cc_screensaver_hint), false,
+                        closing.apply(this::startScreensaver),
+                        closing.apply(() -> open(firstResolvable(new Intent("com.google.android.tv.settings.ambient"),
+                                new Intent(Settings.ACTION_DREAM_SETTINGS), systemIntent(Settings.ACTION_SETTINGS))))),
+                 new ControlCenter.Tile(R.drawable.ic_settings, getString(R.string.cc_all_settings), null, false,
+                        closing.apply(() -> open(systemIntent(Settings.ACTION_SETTINGS))), null)},
+        };
+        View panel = new ControlCenter(this).build(rows);
+        popup[0] = glassPopup(panel, (int) (ControlCenter.WIDTH_DP * density));
+        dropIn(popup[0], panel, anchor, Gravity.END);
+        View first = panel.findViewWithTag("first");
+        if (first != null) first.requestFocus();
+    }
+
+    private static final int REQ_BLUETOOTH = 41;
+
+    /** Google TV's Remotes & Accessories page: TV Settings' slice screen showing the accessories slice. */
+    private static final String ACCESSORIES_SLICE = "content://com.android.tv.settings.accessories.sliceprovider/general";
+
+    /**
+     * Bluetooth: the TV's Bluetooth settings where it has them, else Google TV's Remotes & Accessories page.
+     * Only where neither opens, the Pair accessory screen, which needs BLUETOOTH_CONNECT (granted by the
+     * install scripts), so ask for it once if it is missing.
+     */
+    private void openBluetooth() {
+        Intent bt = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
+        if (bt.resolveActivity(getPackageManager()) != null) {
+            open(bt);
+            return;
+        }
+        Intent remotes = new Intent("android.settings.SLICE_SETTINGS")
+                .setComponent(new ComponentName("com.android.tv.settings", "com.android.tv.settings.slice.SliceActivity"))
+                .setData(Uri.parse(ACCESSORIES_SLICE))
+                .putExtra("slice_uri", ACCESSORIES_SLICE);
+        // TV Settings only lets an app open its slice screen with WRITE_SECURE_SETTINGS (granted by the
+        // install scripts over adb); without it the start is refused, so skip to the pairing screen.
+        if (remotes.resolveActivity(getPackageManager()) != null
+                && checkSelfPermission(android.Manifest.permission.WRITE_SECURE_SETTINGS) == PackageManager.PERMISSION_GRANTED) {
+            open(remotes);
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+                && checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{android.Manifest.permission.BLUETOOTH_CONNECT}, REQ_BLUETOOTH);
+            return;
+        }
+        open(firstResolvable(new Intent("com.google.android.intent.action.CONNECT_INPUT"),
+                systemIntent(Settings.ACTION_SETTINGS)));
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != REQ_BLUETOOTH) return;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) openBluetooth();
+        else open(systemIntent(Settings.ACTION_SETTINGS));   // refused: the TV's settings still reach Bluetooth
+    }
+
+    /** Starts the screensaver now: Google TV's sleep action, else AOSP's Somnambulator. */
+    private void startScreensaver() {
+        Intent sleep = firstResolvable(new Intent("com.google.android.pano.action.SLEEP"),
+                new Intent().setComponent(new ComponentName("com.android.systemui", "com.android.systemui.Somnambulator")));
+        open(sleep);
+    }
+
+    /** The first intent something on the TV answers, else the last one (open() then shows can't-open). */
+    private Intent firstResolvable(Intent... intents) {
+        for (Intent i : intents) if (i.resolveActivity(getPackageManager()) != null) return i;
+        return intents[intents.length - 1];
     }
 
     private Cards.Card cardFor(String pkg) {

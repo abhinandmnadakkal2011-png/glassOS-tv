@@ -10,25 +10,29 @@ import androidx.annotation.NonNull;
 import androidx.recyclerview.widget.RecyclerView;
 
 /**
- * Draws the macOS style translucent band behind the dock row and spaces its square icons.
+ * Draws the liquid-glass band behind the dock row, as on the Control Center tiles: a smoky see-through fill
+ * under a specular rim (GlassEdgeDrawable), and spaces its square icons.
  */
 public class DockDecoration extends RecyclerView.ItemDecoration {
 
     private final int dockSize;
     private final float density;
     private final Paint band = new Paint(Paint.ANTI_ALIAS_FLAG);
-    private final Paint edge = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
+    private final Rect bounds = new Rect();
+    /** The rim, rebuilt only when the corner radius changes (icon size in Home settings). */
+    private GlassEdgeDrawable rim;
+    private float rimRadius;
     /** Band padding around the icons. */
     static final float PAD_DP = 14f;
 
-    DockDecoration(int dockSize, float density) {
+    private final LauncherPrefs prefs;
+
+    DockDecoration(int dockSize, float density, LauncherPrefs prefs) {
         this.dockSize = dockSize;
         this.density = density;
-        band.setColor(0x24FFFFFF);
-        edge.setStyle(Paint.Style.STROKE);
-        edge.setStrokeWidth(density);
-        edge.setColor(0x38FFFFFF);
+        this.prefs = prefs;
+        band.setColor(prefs.uiGlassFill());
     }
 
     @Override
@@ -66,6 +70,12 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
         rect.right = Math.min(rect.right, parent.getWidth() - half);
         float radius = 0.225f * AppAdapter.DOCK_DP * density + pad;
         c.drawRoundRect(rect, radius, radius, band);
-        c.drawRoundRect(rect, radius, radius, edge);
+        if (rim == null || rimRadius != radius) {
+            rim = prefs.uiRim(density, false, radius);
+            rimRadius = radius;
+        }
+        rect.round(bounds);
+        rim.setBounds(bounds);
+        rim.draw(c);
     }
 }

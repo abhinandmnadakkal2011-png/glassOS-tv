@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/glassos/home.png" alt="glassOS-tv home screen: frosted clock over an aurora photo, with a glass dock of app icons" width="820">
+  <img src="docs/glassos/home.png" alt="glassOS-tv home screen: frosted clock over an aurora photo, with a liquid-glass dock of app icons" width="820">
 </p>
 
 | Before (stock Google TV) | After (glassOS-tv) |
@@ -16,7 +16,7 @@
 
 ## Features
 
-- **Glass dock.** One row of square app icons in a translucent band, macOS style. Scrolls sideways when
+- **Glass dock.** One row of square app icons in a liquid-glass band with a bright rim, macOS style. Scrolls sideways when
   there are more apps than fit; Settings is always last. A single glass highlight follows your focus.
 - **Lock-screen clock.** Big centred time and date in frosted, see-through type with a soft shadow, so it
   reads on dark and bright wallpapers alike.
@@ -24,15 +24,23 @@
   from each app's own icon, plus optional glass edges on every icon.
 - **Wallpapers.** Six built-in gradients, 14 photos (Earth from the Space Station, landscapes, cities),
   your own pictures, or **Change daily** for a new one each day. Changes crossfade smoothly.
-- **Home settings on the TV.** Hold OK on the Settings icon: a floating panel opens over Home, and Home
-  updates live behind it as you change icon size, spacing, dock height, clock size and thickness, date
-  size and position, shadows, wallpaper, dimming, and app order and visibility.
-- **Inputs and Wi-Fi.** Hold Up on the dock for Inputs (HDMI, AV, Live TV), Wi-Fi and Settings pills.
+- **Home settings on the TV.** Hold OK on the Settings icon: a floating panel with collapsible Apps,
+  Wallpaper, Clock, Dock and Liquid glass sections opens over Home, and Home updates live behind it as you change icon size, spacing, dock height, clock size and thickness, date
+  size and position, shadows, wallpaper, dimming, liquid glass rim and darkness, and app order and
+  visibility.
+- **Inputs and Wi-Fi.** Hold Up (or press it twice) on the dock for the Inputs (HDMI, AV, Live TV), Wi-Fi and
+  Control Center buttons.
+- **Control Center.** The Control Center button opens floating glass tiles, macOS style: Wi-Fi, Bluetooth, Audio
+  output, Accessibility, Screensaver (starts it now; hold OK for its settings) and All settings.
 - **Lightweight.** About 300 KB, no blur, no video, no network polling. Built and tested on a 1 GB TV.
 
 <p align="center">
-  <img src="docs/glassos/panel.png" alt="Home settings panel floating on the right with Home visible behind it" width="410">
-  <img src="docs/glassos/inputs.png" alt="Inputs menu under the Inputs pill listing HDMI 1, HDMI 2, AV and Live TV" width="410">
+  <img src="docs/glassos/panel.png" alt="Home settings panel floating on the right, its Clock section open, with Home visible behind it" width="410">
+  <img src="docs/glassos/inputs.png" alt="Glass Inputs menu under the top buttons listing HDMI 1, HDMI 2, AV and Live TV" width="410">
+</p>
+
+<p align="center">
+  <img src="docs/glassos/control-center.png" alt="Control Center: glass tiles for Wi-Fi, Bluetooth, Audio output, Accessibility, Screensaver and All settings under the top buttons" width="820">
 </p>
 
 <p align="center">
@@ -156,7 +164,7 @@ lists in [examples/](examples), including
 |---|---|
 | Left / Right on the dock | Move between apps (the dock scrolls) |
 | OK | Open the app |
-| Hold Up on the dock | Show the Inputs, Wi-Fi and Settings pills |
+| Hold Up, or press Up twice, on the dock | Show the Inputs, Wi-Fi and Control Center buttons |
 | OK on Settings (last icon) | TV settings |
 | **Hold OK on Settings** | **Home settings** panel |
 | Home | Back to the first app |

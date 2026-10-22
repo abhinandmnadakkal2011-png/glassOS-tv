@@ -16,10 +16,16 @@ import java.util.Set;
  */
 final class LauncherPrefs {
 
-    static final int DEF_ICON_DP = 66, DEF_GAP_DP = 18, DEF_VISIBLE = 8, DEF_BOTTOM_DP = 18, DEF_CLOCK_SP = 88,
-            DEF_DATE_SP = 19, DEF_CLOCK_TOP_DP = 56, DEF_CLOCK_WEIGHT = 400,
-            DEF_GLASS_EDGE = 3, DEF_GLASS_BRIGHT = 100, DEF_SHADE = 70, DEF_SHADE_HEIGHT = 260,
-            DEF_CLOCK_SHADOW = 50, DEF_WALL_DIM = 15, DEF_ICON_THEME = 0, DEF_ICON_TINT = 0;
+    static final int DEF_ICON_DP = 48, DEF_GAP_DP = 10, DEF_VISIBLE = 8, DEF_BOTTOM_DP = 28, DEF_CLOCK_SP = 84,
+            DEF_DATE_SP = 16, DEF_CLOCK_TOP_DP = 40, DEF_CLOCK_WEIGHT = 400,
+            DEF_GLASS_EDGE = 1, DEF_GLASS_BRIGHT = 80, DEF_SHADE = 80, DEF_SHADE_HEIGHT = 340,
+            DEF_CLOCK_SHADOW = 20, DEF_WALL_DIM = 40, DEF_ICON_THEME = 0, DEF_ICON_TINT = 0;
+    static final boolean DEF_GLOW = false;
+    /** Liquid glass on the dock band, Control Center and Inputs menu: rim brightness %, rim width (half-dp
+     *  steps, as for icons) and how dark the glass is, % opacity of its smoky fill. */
+    static final int DEF_UI_RIM = 70, DEF_UI_RIM_WIDTH = 2, DEF_UI_TINT = 55;
+    /** The photo "Reset all to defaults" picks when it is in the wallpapers folder (tools/push-wallpapers.sh). */
+    static final String DEF_WALL_FILE = "aurora_horizon.jpg";
 
     private static final String FILE = "launcher_settings";
     private static final String ORDER = "order", HIDDEN = "hidden";
@@ -30,15 +36,18 @@ final class LauncherPrefs {
             GLASS_EDGE = "glass_edge", GLASS_BRIGHT = "glass_bright", SHADE = "bottom_shade",
             SHADE_HEIGHT = "bottom_shade_dp", CLOCK_SHADOW = "clock_shadow", WALLPAPER = "wallpaper",
             WALL_DIM = "wallpaper_dim", GLOW = "app_glow", WALL_FILE = "wallpaper_file",
-            ICON_THEME = "icon_theme", ICON_TINT = "icon_tint";
+            ICON_THEME = "icon_theme", ICON_TINT = "icon_tint", PILL_LABELS = "pill_labels",
+            UI_RIM = "ui_glass_rim", UI_RIM_WIDTH = "ui_glass_rim_width", UI_TINT = "ui_glass_tint";
 
     /** Keys Home applies in place with a crossfade instead of rebuilding itself. */
     static final java.util.Set<String> WALLPAPER_KEYS = new java.util.HashSet<>(
             java.util.Arrays.asList(WALLPAPER, WALL_FILE, WALL_DIM));
 
     private final SharedPreferences sp;
+    private final Context ctx;
 
     private LauncherPrefs(Context ctx) {
+        this.ctx = ctx;
         sp = ctx.getSharedPreferences(FILE, Context.MODE_PRIVATE);
     }
 
@@ -97,12 +106,28 @@ final class LauncherPrefs {
         return sp.getBoolean(SHOW_DATE, true);
     }
 
+    /** A rim for liquid-glass UI (dock band, Control Center, Inputs menu) with the owner's settings. */
+    GlassEdgeDrawable uiRim(float density, boolean capsule, float cornerPx) {
+        int w = getInt(UI_RIM_WIDTH, DEF_UI_RIM_WIDTH), b = getInt(UI_RIM, DEF_UI_RIM);
+        return capsule ? new GlassEdgeDrawable(density, w, b, true) : new GlassEdgeDrawable(density, w, b, cornerPx);
+    }
+
+    /** The smoky fill under liquid-glass UI, as dark as set in Home settings. */
+    int uiGlassFill() {
+        int alpha = Math.round(Math.max(0, Math.min(100, getInt(UI_TINT, DEF_UI_TINT))) * 2.55f);
+        return (alpha << 24) | 0x1C1C21;
+    }
+
     int getInt(String key, int def) {
         return sp.getInt(key, def);
     }
 
     boolean getBool(String key) {
         return sp.getBoolean(key, true);
+    }
+
+    boolean getBool(String key, boolean def) {
+        return sp.getBoolean(key, def);
     }
 
     /** Packages in the order the owner arranged them; apps not listed follow in the default order. */
@@ -141,9 +166,18 @@ final class LauncherPrefs {
         sp.edit().putStringSet(HIDDEN, new HashSet<>(pkgs)).putInt(REV, rev() + 1).apply();
     }
 
+    /**
+     * Back to the defaults above. The wallpaper becomes DEF_WALL_FILE when that photo is on the TV and no
+     * theme brings its own picture; otherwise it falls back as on a fresh install.
+     */
     void reset() {
         int next = rev() + 1;
-        sp.edit().clear().putInt(REV, next).apply();
+        SharedPreferences.Editor e = sp.edit().clear().putInt(REV, next);
+        java.io.File dir = ctx.getExternalFilesDir(Wallpapers.FOLDER);
+        if (Config.load(ctx).wallpaper == null && dir != null && new java.io.File(dir, DEF_WALL_FILE).isFile()) {
+            e.putInt(WALLPAPER, Wallpapers.FILE).putString(WALL_FILE, DEF_WALL_FILE);
+        }
+        e.apply();
     }
 
     /**
