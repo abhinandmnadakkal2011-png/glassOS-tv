@@ -56,7 +56,8 @@ Do step 1 below on the TV first.
 ## Install
 
 You need a computer on the same Wi-Fi as the TV, with Python 3, JDK 17 and the Android SDK
-(`platforms;android-34`, `build-tools;34.0.0`). On macOS:
+(`platforms;android-34`, `build-tools;34.0.0`). The steps below are for macOS and Linux; on Windows,
+see [Install on Windows](#install-on-windows). On macOS:
 
 ```bash
 brew install openjdk@17 && brew install --cask android-commandlinetools
@@ -87,6 +88,60 @@ brew install openjdk@17 && brew install --cask android-commandlinetools
    ```
 
 When you're done, turn USB debugging off again and revoke the authorisations: port 5555 is plaintext.
+
+### Install on Windows
+
+Every script has a PowerShell twin, so you don't need WSL or Git Bash. Install
+[Python 3](https://www.python.org/downloads/) (tick **Add python.exe to PATH**) and
+[Android Studio](https://developer.android.com/studio). Android Studio brings the JDK (its `jbr`
+folder) and puts the SDK in `%LOCALAPPDATA%\Android\Sdk`, which the script finds by itself. In Android
+Studio's **SDK Manager**, install **Android 14 (API 34)** and **Build-Tools 34.0.0**. Set `JAVA_HOME`
+or `ANDROID_HOME` only if you keep them somewhere else.
+
+**Without Android Studio**, install JDK 17 and Android's command-line tools instead. Download the
+Windows "Command line tools only" zip from the bottom of
+[developer.android.com/studio](https://developer.android.com/studio#command-line-tools-only) and
+extract it so that `%LOCALAPPDATA%\Android\Sdk\cmdline-tools\latest\bin\sdkmanager.bat` exists. Then:
+
+```powershell
+winget install Microsoft.OpenJDK.17
+$env:JAVA_HOME = (Get-ChildItem 'C:\Program Files\Microsoft\jdk-17*' | Select-Object -First 1).FullName
+$sdkmanager = "$env:LOCALAPPDATA\Android\Sdk\cmdline-tools\latest\bin\sdkmanager.bat"
+& $sdkmanager --licenses
+& $sdkmanager "platforms;android-34" "build-tools;34.0.0"
+```
+
+Run the steps below in the same PowerShell window, or set `JAVA_HOME` permanently, so the install
+script uses this JDK.
+
+1. On the TV, turn on debugging as in step 1 above.
+2. In PowerShell, from the repo folder, set up the ADB client:
+
+   ```powershell
+   python -m venv tools\venv
+   tools\venv\Scripts\python.exe -m pip install -r tools\requirements.txt
+   ```
+
+3. Build, install and make it the home screen (accept the "Allow USB debugging?" prompt on the TV):
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File launcher\build-and-install.ps1 -TvHost 192.168.1.50
+   ```
+
+   Add `-StockLauncher <package>` (or `none`) to choose which launcher gets disabled, and
+   `-InputKeyService` / `-HomeKeyService` for the optional remote-button services.
+
+4. Optional, the photo wallpapers (there is no `.ps1` for this one, so it calls the uploader directly):
+
+   ```powershell
+   $env:TV_HOST = '192.168.1.50'
+   $dest = '/sdcard/Android/data/com.gathin.tvhome/files/wallpapers'
+   tools\venv\Scripts\python.exe -I tools\tv.py "mkdir -p $dest"
+   Get-ChildItem wallpapers\*.jpg | ForEach-Object { tools\venv\Scripts\python.exe -I tools\b64push.py $_.FullName "$dest/$($_.Name)" }
+   ```
+
+The debloat and theme scripts work the same way: `tools\disable.ps1`, `tools\restore.ps1` and
+`tools\theme.ps1`, each with `-TvHost`.
 
 ### Debloat (optional)
 
