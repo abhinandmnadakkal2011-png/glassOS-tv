@@ -7,12 +7,12 @@
 </p>
 
 <p align="center">
-  <img src="docs/glassos/home.png" alt="glassOS-tv home screen: frosted clock over a photo of Earth from orbit, with a liquid-glass dock of app icons" width="820">
+  <img src="docs/screenshots/home.png" alt="glassOS-tv home screen: frosted clock over a photo of Earth from orbit, with a liquid-glass dock of app icons" width="820">
 </p>
 
 | Before (stock Google TV) | After (glassOS-tv) |
 |---|---|
-| ![Stock Google TV home with ad rows](docs/glassos/stock.png) | ![glassOS-tv home](docs/glassos/home.png) |
+| ![Stock Google TV home with ad rows](docs/screenshots/stock.png) | ![glassOS-tv home](docs/screenshots/home.png) |
 
 ## Features
 
@@ -35,16 +35,16 @@
 - **Lightweight.** About 300 KB, no blur, no video, no network polling. Built and tested on a 1 GB TV.
 
 <p align="center">
-  <img src="docs/glassos/panel.png" alt="Home settings panel floating on the right, its Clock section open, with Home visible behind it" width="410">
-  <img src="docs/glassos/inputs.png" alt="Glass Inputs menu under the top buttons listing HDMI 1, HDMI 2, AV and Live TV" width="410">
+  <img src="docs/screenshots/panel.png" alt="Home settings panel floating on the right, its Clock section open, with Home visible behind it" width="410">
+  <img src="docs/screenshots/inputs.png" alt="Glass Inputs menu under the top buttons listing HDMI 1, HDMI 2, AV and Live TV" width="410">
 </p>
 
 <p align="center">
-  <img src="docs/glassos/control-center.png" alt="Control Center: glass tiles for Wi-Fi, Bluetooth, Audio output, Accessibility, Screensaver and All settings under the top buttons" width="820">
+  <img src="docs/screenshots/control-center.png" alt="Control Center: glass tiles for Wi-Fi, Bluetooth, Audio output, Accessibility, Screensaver and All settings under the top buttons" width="820">
 </p>
 
 <p align="center">
-  <img src="docs/glassos/icon-styles.png" alt="The same dock icons in the Original, Dark, Clear and Tinted styles" width="820">
+  <img src="docs/screenshots/icon-styles.png" alt="The same dock icons in the Original, Dark, Clear and Tinted styles" width="820">
 </p>
 
 ## Install with Claude Code
@@ -154,8 +154,8 @@ The debloat and theme scripts work the same way: `tools\disable.ps1`, `tools\res
 ### Debloat (optional)
 
 This project keeps CleanYourTV's debloat tooling: back up, disable telemetry and ad rows in small
-batches, and restore with one script. See [docs/CLEANYOURTV.md](docs/CLEANYOURTV.md) and the per-model
-lists in [examples/](examples), including
+batches, and restore with one script: `tools/disable.sh` (or `.ps1`) applies a list, `tools/restore.sh`
+undoes it. See the per-model lists in [examples/](examples), including
 [examples/xiaomi-mitv-axfu0](examples/xiaomi-mitv-axfu0/debloat.txt). Nothing is uninstalled.
 
 ## Using it
