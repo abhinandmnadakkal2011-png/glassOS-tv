@@ -67,21 +67,23 @@ class ExampleListsTest(unittest.TestCase):
                          "examples/README.md rows and examples/ folders differ")
         self.assertEqual(len(listed), len(set(listed)), "a folder is listed twice")
 
-    def test_readme_table_has_one_row_per_list(self):
+    def test_readme_tested_tvs_have_lists(self):
+        # README.md lists only the TVs the launcher was tried on, each of which has a debloat list.
         readme_rows = table_rows(ROOT / "README.md", "| TV | OS |")
-        example_rows = table_rows(EXAMPLES / "README.md", "| Folder |")
-        self.assertEqual(len(readme_rows), len(example_rows),
-                         "README.md TV table and examples/README.md have a different number of rows")
-        readme_tvs = sorted(r.split("|")[1].strip() for r in readme_rows)
-        example_tvs = sorted(r.split("|")[2].strip() for r in example_rows)
-        self.assertEqual(readme_tvs, example_tvs, "the TV column differs between the two tables")
+        self.assertTrue(readme_rows, "README.md Tested on table is empty")
+        example_tvs = {(r.split("|")[2].strip(), r.split("|")[3].strip())
+                       for r in table_rows(EXAMPLES / "README.md", "| Folder |")}
+        for row in readme_rows:
+            tv, os_name = row.split("|")[1].strip(), row.split("|")[2].strip()
+            with self.subTest(tv=tv):
+                self.assertIn((tv, os_name), example_tvs,
+                              "README.md Tested on row has no matching TV and OS in examples/README.md")
 
     @unittest.skipUnless(os.environ.get("CLEANYOURTV_STRICT"), "counts are fixed up on merge; strict on main only")
     def test_readme_counts(self):
         text = (ROOT / "README.md").read_text(encoding="utf-8")
         n = len(folders())
-        self.assertIn(f"{n} TV lists", text, "nav link count is stale")
-        self.assertIn(f"{n} TVs with tested lists", text, "numbers line is stale")
+        self.assertIn(f"{n} TV lists", text, "debloat section count is stale")
 
 
 if __name__ == "__main__":

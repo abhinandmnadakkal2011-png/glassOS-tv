@@ -155,7 +155,7 @@ The debloat and theme scripts work the same way: `tools\disable.ps1`, `tools\res
 
 This project keeps CleanYourTV's debloat tooling: back up, disable telemetry and ad rows in small
 batches, and restore with one script: `tools/disable.sh` (or `.ps1`) applies a list, `tools/restore.sh`
-undoes it. See the per-model lists in [examples/](examples), including
+undoes it. See the 159 TV lists in [examples/](examples), including
 [examples/xiaomi-mitv-axfu0](examples/xiaomi-mitv-axfu0/debloat.txt). Nothing is uninstalled.
 
 ## Using it
