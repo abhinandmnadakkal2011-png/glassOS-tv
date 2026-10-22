@@ -54,6 +54,7 @@
     <string name="ls_ui_rim">Rim brightness</string>
     <string name="ls_ui_rim_width">Rim thickness</string>
     <string name="ls_ui_tint">Glass darkness</string>
+    <string name="ls_dock_tint">Dock tint (light grey)</string>
     <string name="ls_icon_size">Icon size</string>
     <string name="ls_spacing">Space between icons</string>
     <string name="ls_visible">Icons shown before scrolling</string>

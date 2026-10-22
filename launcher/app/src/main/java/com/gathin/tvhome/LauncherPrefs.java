@@ -23,7 +23,9 @@ final class LauncherPrefs {
     static final boolean DEF_GLOW = false;
     /** Liquid glass on the dock band, Control Center and Inputs menu: rim brightness %, rim width (half-dp
      *  steps, as for icons) and how dark the glass is, % opacity of its smoky fill. */
-    static final int DEF_UI_RIM = 70, DEF_UI_RIM_WIDTH = 2, DEF_UI_TINT = 55;
+    static final int DEF_UI_RIM = 85, DEF_UI_RIM_WIDTH = 2, DEF_UI_TINT = 55;
+    /** Light grey wash over the dock's glass, % opacity of white. */
+    static final int DEF_DOCK_TINT = 12;
     /** The photo "Reset all to defaults" picks when it is in the wallpapers folder (tools/push-wallpapers.sh). */
     static final String DEF_WALL_FILE = "aurora_horizon.jpg";
 
@@ -37,7 +39,8 @@ final class LauncherPrefs {
             SHADE_HEIGHT = "bottom_shade_dp", CLOCK_SHADOW = "clock_shadow", WALLPAPER = "wallpaper",
             WALL_DIM = "wallpaper_dim", GLOW = "app_glow", WALL_FILE = "wallpaper_file",
             ICON_THEME = "icon_theme", ICON_TINT = "icon_tint", PILL_LABELS = "pill_labels",
-            UI_RIM = "ui_glass_rim", UI_RIM_WIDTH = "ui_glass_rim_width", UI_TINT = "ui_glass_tint";
+            UI_RIM = "ui_glass_rim", UI_RIM_WIDTH = "ui_glass_rim_width", UI_TINT = "ui_glass_tint",
+            DOCK_TINT = "dock_tint";
 
     /** Keys Home applies in place with a crossfade instead of rebuilding itself. */
     static final java.util.Set<String> WALLPAPER_KEYS = new java.util.HashSet<>(

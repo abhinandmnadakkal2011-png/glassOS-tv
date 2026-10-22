@@ -147,6 +147,7 @@ public class LauncherSettingsActivity extends Activity {
         glass.addView(stepper(R.string.ls_ui_rim, LauncherPrefs.UI_RIM, LauncherPrefs.DEF_UI_RIM, 0, 150, 10, "%"));
         glass.addView(stepper(R.string.ls_ui_rim_width, LauncherPrefs.UI_RIM_WIDTH, LauncherPrefs.DEF_UI_RIM_WIDTH, 1, 6, 1, ""));
         glass.addView(stepper(R.string.ls_ui_tint, LauncherPrefs.UI_TINT, LauncherPrefs.DEF_UI_TINT, 0, 100, 5, "%"));
+        glass.addView(stepper(R.string.ls_dock_tint, LauncherPrefs.DOCK_TINT, LauncherPrefs.DEF_DOCK_TINT, 0, 50, 2, "%"));
         showOpen();
 
         col.addView(section(R.string.ls_other));

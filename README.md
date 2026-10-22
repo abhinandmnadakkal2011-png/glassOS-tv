@@ -7,7 +7,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/glassos/home.png" alt="glassOS-tv home screen: frosted clock over an aurora photo, with a liquid-glass dock of app icons" width="820">
+  <img src="docs/glassos/home.png" alt="glassOS-tv home screen: frosted clock over a photo of Earth from orbit, with a liquid-glass dock of app icons" width="820">
 </p>
 
 | Before (stock Google TV) | After (glassOS-tv) |

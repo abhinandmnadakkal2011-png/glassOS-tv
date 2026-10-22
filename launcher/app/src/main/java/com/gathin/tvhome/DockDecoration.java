@@ -18,6 +18,11 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
     private final int dockSize;
     private final float density;
     private final Paint band = new Paint(Paint.ANTI_ALIAS_FLAG);
+    /** A light grey wash over the smoky fill (Home settings: Liquid glass > Dock tint). */
+    private final Paint tint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    /** An even hairline all round, as on the original dock, so the band's shape reads on any wallpaper;
+     *  the glass rim alone fades out along the sides. */
+    private final Paint outline = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final RectF rect = new RectF();
     private final Rect bounds = new Rect();
     /** The rim, rebuilt only when the corner radius changes (icon size in Home settings). */
@@ -33,6 +38,11 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
         this.density = density;
         this.prefs = prefs;
         band.setColor(prefs.uiGlassFill());
+        int t = Math.max(0, Math.min(100, prefs.getInt(LauncherPrefs.DOCK_TINT, LauncherPrefs.DEF_DOCK_TINT)));
+        tint.setColor((Math.round(t * 2.55f) << 24) | 0xD8D8DC);
+        outline.setStyle(Paint.Style.STROKE);
+        outline.setStrokeWidth(density);
+        outline.setColor(0x38FFFFFF);
     }
 
     @Override
@@ -70,6 +80,8 @@ public class DockDecoration extends RecyclerView.ItemDecoration {
         rect.right = Math.min(rect.right, parent.getWidth() - half);
         float radius = 0.225f * AppAdapter.DOCK_DP * density + pad;
         c.drawRoundRect(rect, radius, radius, band);
+        if (tint.getAlpha() > 0) c.drawRoundRect(rect, radius, radius, tint);
+        c.drawRoundRect(rect, radius, radius, outline);
         if (rim == null || rimRadius != radius) {
             rim = prefs.uiRim(density, false, radius);
             rimRadius = radius;
