@@ -1,0 +1,19 @@
+name: Build Android APK
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      - name: Build APK
+        run: ./gradlew assembleDebug || cd launcher && ./gradlew assembleDebug
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: glassOS-Launcher
+          path: "**/build/outputs/apk/debug/*.apk"
